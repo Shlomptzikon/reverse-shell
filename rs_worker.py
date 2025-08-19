@@ -124,19 +124,24 @@ class Worker:
         data = struct.pack("I", len(message)) + message
         self.client.send(data)
 
+    def recvall(self, size: int) -> bytes:
+        data = b""
+        while len(data) < size:
+            packet = self.client.recv(size - len(data))
+            if not packet:  # connection closed
+                return b""
+            data += packet
+        return data
 
-    def receiver(self) -> str:
-        data = self.client.recv(4)
-        size = struct.unpack("I",data)[0]
+    def receiver(self) -> bytes:
+        raw_size = self.recvall(4)
+        if not raw_size:
+            return b""
+        size = struct.unpack("I", raw_size)[0]
         if size == 0:
-            return ""
-        message = self.client.recv(4096)
-        size -=4096
-        while size>0:
-            message+=self.client.recv(4096)
-            size-=4096
-            time.sleep(0.01)
-        return message.decode()
+            return b""
+        message = self.recvall(size)
+        return message
 
     def run(self):
         self.connect()
