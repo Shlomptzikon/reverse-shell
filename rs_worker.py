@@ -133,15 +133,15 @@ class Worker:
             data += packet
         return data
 
-    def receiver(self) -> bytes:
+    def receiver(self) -> str:
         raw_size = self.recvall(4)
         if not raw_size:
-            return b""
+            return ""
         size = struct.unpack("I", raw_size)[0]
         if size == 0:
-            return b""
+            return ""
         message = self.recvall(size)
-        return message
+        return message.decode()
 
     def run(self):
         self.connect()

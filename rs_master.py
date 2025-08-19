@@ -187,7 +187,7 @@ class Master:
         data = b""
         while len(data) < size:
             packet = self.client.recv(size - len(data))
-            if not packet:  # connection closed
+            if not packet:
                 return b""
             data += packet
         return data
@@ -199,8 +199,6 @@ class Master:
         size = struct.unpack("I", raw_size)[0]
         if size == 0:
             return b""
-
-        # Read the full frame
         message = self.recvall(size)
         return message
 
@@ -219,18 +217,14 @@ class Master:
             if not frame_data:
                 break
 
-            # Decode JPEG
             frame = cv2.imdecode(np.frombuffer(frame_data, dtype=np.uint8), cv2.IMREAD_COLOR)
             if frame is None:
                 continue
 
-            # --- Aspect ratio scaling ---
             h, w, _ = frame.shape
             scale = min(screen_width / w, screen_height / h)
             new_w, new_h = int(w * scale), int(h * scale)
             resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-
-            # Place on black canvas
             canvas = np.zeros((screen_height, screen_width, 3), dtype=np.uint8)
             x_offset = (screen_width - new_w) // 2
             y_offset = (screen_height - new_h) // 2
