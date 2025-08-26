@@ -1,3 +1,4 @@
+import json
 import socket
 import time
 from typing import Callable
@@ -75,37 +76,34 @@ def screen_shot(doesnt_matter:str)->bytes:
         decoded_img = file.read()
     return decoded_img
 
-def button_event(param:bytes):
-    data = param.split(b":")
-    mouse = Controller()
-    if data[0] == b"down":
-        if data[1] == b"left":
-            mouse.press(Button.left)
-        else:
-            mouse.press(Button.right)
-    else:
-        if data[1] == b"left":
-            mouse.release(Button.left)
-        else:
-            mouse.release(Button.right)
-
-def scroll_event(param:bytes):
-    delta = struct.unpack('f',param)[0]
-    mouse = Controller()
-    mouse.scroll(0,delta)
-
-def move_event(param:bytes):
-    data = param.split(b":")
-    xp = int.from_bytes(data[0], byteorder="big", signed=False)
-    yp = int.from_bytes(data[1], byteorder="big", signed=False)
-    mouse = Controller()
-    mouse.position = (xp,yp)
+def map_button_name(name:str):
+    n = name.lower()
+    if n == "left":
+        return Button.left
+    if n == "right":
+        return Button.right
+    if n == "middle":
+        return Button.middle
 
 def control_mouse(parameters:bytes) -> bytes:
-    options = {b"ButtonEvent":button_event, b"WheelEvent":scroll_event, b"MoveEvent":move_event}
-    data = parameters.split(b":",1)
-    event_name = data[0]
-    options[event_name](data[1])
+    mouse = Controller()
+    payload = json.loads(parameters.decode('utf-8'))
+    typ = payload.get("type")
+    if typ == "button":
+        action = payload.get("action", "").lower()
+        btn_name = payload.get("button", "left")
+        btn = map_button_name(btn_name)
+        if action in "down":
+            mouse.press(btn)
+        elif action in "up":
+            mouse.release(btn)
+    elif typ == "wheel":
+        delta = float(payload.get("delta", 0))
+        mouse.scroll(0, int(delta))
+    elif typ == "move_abs":
+        x = int(payload.get("x", 0))
+        y = int(payload.get("y", 0))
+        mouse.position = (x, y)
     return b"mouse was moved successfully"
 
 def sniff_from_worker(parameters:str) -> bytes:
