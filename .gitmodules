@@ -1,0 +1,9 @@
+[submodule "aes"]
+	path = aes
+	url = https://github.com/Shlomptzikon/aes.git
+[submodule "rsa"]
+	path = rsa
+	url = https://github.com/Shlomptzikon/rsa.git
+[submodule "DHE"]
+	path = DHE
+	url = https://github.com/Shlomptzikon/DHE.git
