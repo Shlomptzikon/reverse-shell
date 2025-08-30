@@ -80,18 +80,19 @@ class Master:
 
 
     def connect(self):
-        client, address = self.server.accept()
-        with self._sock_lock:
-            rsa_public_client = self.receiver(open_seal=False,sock=client)
-        self.rsa.load_peer_public_key(rsa_public_client)
-        with self._sock_lock:
-            self.sender(self.rsa.dump_my_public_key(),seal=False, sock=client)
-            client_aes_key_en =self.receiver(open_seal=False, sock=client)
-        master_key = os.urandom(16).hex().encode()
-        self.sender(self.rsa.send(master_key, hashlib.sha256(master_key).digest()), seal=False, sock=client)
-        stream_client = self.stream_server.accept()[0]
-        self.clients[address[0]] = Client(client,stream_client,self.rsa.receive(client_aes_key_en).encode(),master_key)
-        self.update_clients()
+        while True:
+            client, address = self.server.accept()
+            with self._sock_lock:
+                rsa_public_client = self.receiver(open_seal=False,sock=client)
+            self.rsa.load_peer_public_key(rsa_public_client)
+            with self._sock_lock:
+                self.sender(self.rsa.dump_my_public_key(),seal=False, sock=client)
+                client_aes_key_en =self.receiver(open_seal=False, sock=client)
+            master_key = os.urandom(16).hex().encode()
+            self.sender(self.rsa.send(master_key, hashlib.sha256(master_key).digest()), seal=False, sock=client)
+            stream_client = self.stream_server.accept()[0]
+            self.clients[address[0]] = Client(client,stream_client,self.rsa.receive(client_aes_key_en).encode(),master_key)
+            self.update_clients()
 
     def recvall(self, sock: socket.socket, size: int) -> bytes:
         data = b""
@@ -276,9 +277,9 @@ class Master:
         if function == "quit":
             with self._sock_lock:
                 self.sender("quit".encode())
-            self.server.close()
-            self.stream_server.close()
             self.clients[self.cur_ip].close_client()
+            del self.clients[self.cur_ip]
+            self.update_clients()
             return "exited the worker".encode()
         if function == "send_file":
             splitted = message.decode().split(":")
