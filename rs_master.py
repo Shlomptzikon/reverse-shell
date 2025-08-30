@@ -11,10 +11,10 @@ import mouse
 import numpy as np
 import keyboard
 import json
-from encryption.rsa import rsa
+from rsa import rsa
 import hashlib
-from encryption.DHE.my_hmac import HMAC
-from encryption.aes.aes_types import CTR
+from DHE.my_hmac import HMAC
+from aes.aes_types import CTR
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
 Commend = Callable[[],bytes]
@@ -76,22 +76,23 @@ class Master:
         self.listen = False
         self.clients:dict[(str,int),Client] = {}
         private_key, public_key = rsa.rsa_keys(rsa.distant_random_primes(1024))
-        self.rsa = rsa.RSA(my_public_key=public_key,my_private_key=private_key)
+        self.rsa = rsa.RSA(my_public_key=public_key, my_private_key=private_key)
 
 
     def connect(self):
-        client, address = self.server.accept()
-        with self._sock_lock:
-            rsa_public_client = self.receiver(open_seal=False,sock=client)
-        self.rsa.load_peer_public_key(rsa_public_client)
-        with self._sock_lock:
-            self.sender(self.rsa.dump_my_public_key(),seal=False, sock=client)
-            client_aes_key_en =self.receiver(open_seal=False, sock=client)
-        master_key = os.urandom(16).hex().encode()
-        self.sender(self.rsa.send(master_key, hashlib.sha256(master_key).digest()), seal=False, sock=client)
-        stream_client = self.stream_server.accept()[0]
-        self.clients[address[0]] = Client(client,stream_client,self.rsa.receive(client_aes_key_en).encode(),master_key)
-        self.update_clients()
+        while True:
+            client, address = self.server.accept()
+            with self._sock_lock:
+                rsa_public_client = self.receiver(open_seal=False,sock=client)
+            self.rsa.load_peer_public_key(rsa_public_client)
+            with self._sock_lock:
+                self.sender(self.rsa.dump_my_public_key(),seal=False, sock=client)
+                client_aes_key_en =self.receiver(open_seal=False, sock=client)
+            master_key = os.urandom(16).hex().encode()
+            self.sender(self.rsa.send(master_key, hashlib.sha256(master_key).digest()), seal=False, sock=client)
+            stream_client = self.stream_server.accept()[0]
+            self.clients[address[0]] = Client(client,stream_client,self.rsa.receive(client_aes_key_en).encode(),master_key)
+            self.update_clients()
 
     def recvall(self, sock: socket.socket, size: int) -> bytes:
         data = b""
@@ -276,9 +277,9 @@ class Master:
         if function == "quit":
             with self._sock_lock:
                 self.sender("quit".encode())
-            self.server.close()
-            self.stream_server.close()
             self.clients[self.cur_ip].close_client()
+            del self.clients[self.cur_ip]
+            self.update_clients()
             return "exited the worker".encode()
         if function == "send_file":
             splitted = message.decode().split(":")

