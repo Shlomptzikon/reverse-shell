@@ -11,10 +11,10 @@ import mouse
 import numpy as np
 import keyboard
 import json
-from encryption.rsa import rsa
+from rsa import rsa
 import hashlib
-from encryption.DHE.my_hmac import HMAC
-from encryption.aes.aes_types import CTR
+from DHE.my_hmac import HMAC
+from aes.aes_types import CTR
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
 Commend = Callable[[],bytes]
@@ -76,7 +76,7 @@ class Master:
         self.listen = False
         self.clients:dict[(str,int),Client] = {}
         private_key, public_key = rsa.rsa_keys(rsa.distant_random_primes(1024))
-        self.rsa = rsa.RSA(my_public_key=public_key,my_private_key=private_key)
+        self.rsa = rsa.RSA(my_public_key=public_key, my_private_key=private_key)
 
 
     def connect(self):
