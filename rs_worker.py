@@ -1,5 +1,6 @@
 import json
 import socket
+import sys
 import threading
 import time
 from typing import Callable
@@ -219,7 +220,7 @@ class Worker:
         mac = hashlib.sha256(b"MAC" + self.peer_master_key).digest()
         return enc, mac
 
-    def receiver(self, stream: bool = False, open_seal: bool = True) -> bytes:
+    def receiver(self, stream: bool = False, open_seal: bool = True, my_enc:bool = False) -> bytes:
         if stream:
             sock = self.stream_client
         else:
@@ -240,16 +241,22 @@ class Worker:
             c = blob[12:-32]
             header = aad + nonce
             to_mac = header + c
-            calc = hmac.new(mac_key, to_mac, hashlib.sha256).digest()
+            if not my_enc:
+                calc = hmac.new(mac_key, to_mac, hashlib.sha256).digest()
+            else:
+                calc = HMAC("sha256",to_mac,mac_key,32)
             if not hmac.compare_digest(calc, tag):
                 return b"error: Authentication failed"
-            ctr = Counter.new(128, initial_value=int.from_bytes(nonce))
-            return AES.new(aes_key, AES.MODE_CTR, counter=ctr).decrypt(c)
-
+            if not my_enc:
+                ctr = Counter.new(128, initial_value=int.from_bytes(nonce))
+                return AES.new(aes_key, AES.MODE_CTR,counter=ctr).decrypt(c)
+            else:
+                ctr = CTR(aes_key,nonce)
+                return ctr.decrypt(c)
         else:
             return blob
 
-    def sender(self, message: bytes, stream: bool = False, seal: bool = True):
+    def sender(self, message: bytes, stream: bool = False, seal: bool = True, my_enc:bool = False):
         if stream:
             client_sock = self.stream_client
         else:
@@ -257,11 +264,18 @@ class Worker:
         if seal:
             aes_key, mac_key = self.derive_own_keys()
             nonce = os.urandom(8)
-            ctr = Counter.new(128, initial_value=int.from_bytes(nonce))
-            c = AES.new(aes_key, AES.MODE_CTR, counter=ctr).encrypt(message)
-            header = struct.pack("I", len(message)) + nonce
-            to_mac = header + c
-            tag = hmac.new(mac_key, to_mac, hashlib.sha256).digest()
+            if not my_enc:
+                ctr = Counter.new(128, initial_value=int.from_bytes(nonce))
+                c = AES.new(aes_key, AES.MODE_CTR, counter=ctr).encrypt(message)
+                header = struct.pack("I", len(message)) + nonce
+                to_mac = header + c
+                tag = hmac.new(mac_key, to_mac, hashlib.sha256).digest()
+            else:
+                ctr = CTR(aes_key, nonce)
+                c = ctr.encrypt(message)
+                header = struct.pack("I", len(message)) + nonce
+                to_mac = header + c
+                tag = HMAC("sha256", to_mac, mac_key, 32)
             data = struct.pack("I", len(header + c + tag)) + header + c + tag
         else:
             data = struct.pack("I", len(message)) + message
