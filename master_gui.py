@@ -5,8 +5,6 @@ import flet as ft
 from flet.core.types import FontWeight
 import threading
 
-from rs_worker import listen_to_keys
-
 
 def get_options(functions:list[str],type:str) -> list[DropdownOption]:
     options_list = []
@@ -80,16 +78,36 @@ class App:
         self.ts.start()
         self.tk.start()
         self.tm.start()
+        self.user_input = ft.TextField(label="enter user name", filled=True,border=ft.InputBorder.UNDERLINE)
+        self.password_input = ft.TextField(label="enter password", filled=True,border=ft.InputBorder.UNDERLINE, password=True, can_reveal_password=True)
+        self.user:bool = False
+        self.admin:bool = False
 
-
+    def submit_user(self,e):
+        username = self.user_input.value
+        password = self.password_input.value
+        if not username or not password:
+            return
+        credentials = self.master.login(username, password)
+        if credentials == "admin":
+            self.user = True
+            self.admin = True
+            return
+        if credentials == "user":
+            self.user = True
+            return
 
 
     def chosen_client(self, e):
-        self.control_mouse.disabled = False
-        self.control_keys.disabled = False
-        self.livestream.disabled = False
-        self.commands.disabled = False
         self.master.cur_ip = self.workers.value
+        self.page.open(ft.AlertDialog(content=ft.Row(controls=[self.user_input,self.password_input,ft.OutlinedButton(text="submit", on_click=self.submit_user)])))
+        if self.admin:
+            self.commands.disabled = False
+            self.control_mouse.disabled = False
+            self.control_keys.disabled = False
+            self.livestream.disabled = False
+        elif self.user:
+            self.commands.disabled = False
         self.page.update()
     def control_mouse_of_worker(self,e):
         self.master.control_mouse = self.control_mouse.value
@@ -209,7 +227,7 @@ class App:
         else:
             if function == "screen_shot":
                 self.save_file(self.master.run2(function,function.encode()))
-            elif function == listen_to_keys:
+            elif function == "listen_to_keys":
                 while self.listen:
                     self.add_output(self.master.run2("listen_to_keys", "listen_to_keys".encode()).decode())
                 self.listen = True
