@@ -341,7 +341,7 @@ class Worker:
                 self.sender(b"stopped_listening")
                 continue
             if name == "login":
-                message = self.login(commend.decode())
+                message = self.login(commend)
             else:
                 message = self.functions[name](commend)
             if name not in ["control_mouse", "press_key_in_worker", "live_stream", "stop_stream", "listen_to_keys", "stop_listen_to_keys"]:
