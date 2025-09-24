@@ -5,8 +5,6 @@ import flet as ft
 from flet.core.types import FontWeight
 import threading
 
-from rs_worker import listen_to_keys
-
 
 def get_options(functions:list[str],type:str) -> list[DropdownOption]:
     options_list = []
@@ -209,7 +207,7 @@ class App:
         else:
             if function == "screen_shot":
                 self.save_file(self.master.run2(function,function.encode()))
-            elif function == listen_to_keys:
+            elif function == "listen_to_keys":
                 while self.listen:
                     self.add_output(self.master.run2("listen_to_keys", "listen_to_keys".encode()).decode())
                 self.listen = True
