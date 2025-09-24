@@ -7,7 +7,6 @@ import struct
 import hmac
 import threading
 import cv2
-import mouse
 import numpy as np
 import keyboard
 import json
@@ -40,6 +39,8 @@ class Client:
         self.stream_sock = stream_sock
         self.master_key = master_key
         self.peer_master_key = peer_master_key
+
+
 
     def derive_own_keys(self):
         enc = hashlib.sha256(b"ENC" + self.master_key).digest()[:16]
@@ -94,6 +95,10 @@ class Master:
             self.clients[address[0]] = Client(client,stream_client,self.rsa.receive(client_aes_key_en).encode(),master_key)
             self.update_clients()
 
+
+    def login(self,username:str, password:str) -> str:
+        self.sender(b"login:"+ username.encode() + b":" + password.encode())
+        return self.receiver().decode()
     def recvall(self, sock: socket.socket, size: int) -> bytes:
         data = b""
         while len(data) < size:

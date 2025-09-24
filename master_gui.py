@@ -78,16 +78,36 @@ class App:
         self.ts.start()
         self.tk.start()
         self.tm.start()
+        self.user_input = ft.TextField(label="enter user name", filled=True,border=ft.InputBorder.UNDERLINE)
+        self.password_input = ft.TextField(label="enter password", filled=True,border=ft.InputBorder.UNDERLINE, password=True, can_reveal_password=True)
+        self.user:bool = False
+        self.admin:bool = False
 
-
+    def submit_user(self,e):
+        username = self.user_input.value
+        password = self.password_input.value
+        if not username or not password:
+            return
+        credentials = self.master.login(username, password)
+        if credentials == "admin":
+            self.user = True
+            self.admin = True
+            return
+        if credentials == "user":
+            self.user = True
+            return
 
 
     def chosen_client(self, e):
-        self.control_mouse.disabled = False
-        self.control_keys.disabled = False
-        self.livestream.disabled = False
-        self.commands.disabled = False
         self.master.cur_ip = self.workers.value
+        self.page.open(ft.AlertDialog(content=ft.Row(controls=[self.user_input,self.password_input,ft.OutlinedButton(text="submit", on_click=self.submit_user)])))
+        if self.admin:
+            self.commands.disabled = False
+            self.control_mouse.disabled = False
+            self.control_keys.disabled = False
+            self.livestream.disabled = False
+        elif self.user:
+            self.commands.disabled = False
         self.page.update()
     def control_mouse_of_worker(self,e):
         self.master.control_mouse = self.control_mouse.value

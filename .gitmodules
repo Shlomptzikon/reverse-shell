@@ -7,3 +7,6 @@
 [submodule "DHE"]
 	path = DHE
 	url = https://github.com/Shlomptzikon/DHE.git
+[submodule "mysql"]
+	path = mysql
+	url = https://github.com/Shlomptzikon/sql-.git
