@@ -7,8 +7,6 @@ from typing import Callable
 import os
 import struct
 import subprocess
-from warnings import catch_warnings
-
 import pynput.keyboard
 from rsa import rsa
 import hashlib
@@ -26,7 +24,7 @@ from Crypto.Cipher import AES
 from Crypto.Util import Counter
 import mss
 from mysql.engine import Engine
-from mysql.query import *
+from mysql.query import Select,Field,Table,Create
 special_keys = {
     "enter": Key.enter,
     "esc": Key.esc,
@@ -172,7 +170,7 @@ class Worker:
         self.name = Field("name",str,primary=True)
         admin = Field("admin",bool,nullable=True)
         password = Field("password",str)
-        self.users_table = Table("users",(name,password,admin))
+        self.users_table = Table("users",(self.name,password,admin))
         create = Create(self.users_table,exists_ok=True)
         self.engine.execute(create)
         self.pepper = os.urandom(32)

@@ -100,7 +100,7 @@ class App:
 
     def chosen_client(self, e):
         self.master.cur_ip = self.workers.value
-        self.page.open(ft.AlertDialog(content=ft.Row(controls=[self.user_input,self.password_input,ft.OutlinedButton(text="submit", on_click=self.submit_user)])))
+        self.page.open(ft.AlertDialog(content=ft.Column(controls=[self.user_input,self.password_input,ft.OutlinedButton(text="submit", on_click=self.submit_user)])))
         if self.admin:
             self.commands.disabled = False
             self.control_mouse.disabled = False
