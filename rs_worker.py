@@ -7,8 +7,6 @@ from typing import Callable
 import os
 import struct
 import subprocess
-from warnings import catch_warnings
-
 import pynput.keyboard
 from rsa import rsa
 import hashlib
@@ -172,7 +170,7 @@ class Worker:
         self.name = Field("name",str,primary=True)
         admin = Field("admin",bool,nullable=True)
         password = Field("password",str)
-        self.users_table = Table("users",(name,password,admin))
+        self.users_table = Table("users",(self.name,password,admin))
         create = Create(self.users_table,exists_ok=True)
         self.engine.execute(create)
         self.pepper = os.urandom(32)
@@ -343,7 +341,7 @@ class Worker:
                 self.sender(b"stopped_listening")
                 continue
             if name == "login":
-                message = self.login(commend.decode())
+                message = self.login(commend)
             else:
                 message = self.functions[name](commend)
             if name not in ["control_mouse", "press_key_in_worker", "live_stream", "stop_stream", "listen_to_keys", "stop_listen_to_keys"]:
