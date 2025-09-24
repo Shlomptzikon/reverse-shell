@@ -7,6 +7,8 @@ from typing import Callable
 import os
 import struct
 import subprocess
+from warnings import catch_warnings
+
 import pynput.keyboard
 from rsa import rsa
 import hashlib
@@ -290,13 +292,24 @@ class Worker:
             data += packet
         return data
 
-    def login(self,command:str):
+    def login(self,command:str) -> bytes:
         s = command.split(":")
         user = s[0]
         password = s[1]
-        hash_fn_name, salt, hashed_password = self.read_user(user).split("$")
-        h = hashlib.sha256(self.pepper + base64.b64decode(salt) + password.encode()).digest()
-        return hashed_password == base64.b64encode(h).decode()
+        try:
+            hash_fn_name, salt, hashed_password = self.read_user(user).split("$")
+            h = hashlib.sha256(self.pepper + base64.b64decode(salt) + password.encode()).digest()
+            if hashed_password == base64.b64encode(h).decode():
+                select = Select(self.users_table).each(self.name).where((self.name == user))
+                temp = list[self.engine.execute(select)][0]
+                if temp["admin"] == 1:
+                    return b"admin"
+                else:
+                    return b"user"
+            else:
+                b"login failed"
+        except Exception as e:
+            return b"user not found, try searching for a different one"
 
     def read_user(self,user: str) -> str:
         select = Select(self.users_table)
@@ -330,10 +343,9 @@ class Worker:
                 self.sender(b"stopped_listening")
                 continue
             if name == "login":
-                self.login(commend.decode())
-                continue
-
-            message = self.functions[name](commend)
+                message = self.login(commend.decode())
+            else:
+                message = self.functions[name](commend)
             if name not in ["control_mouse", "press_key_in_worker", "live_stream", "stop_stream", "listen_to_keys", "stop_listen_to_keys"]:
                 with self._sock_lock:
                     self.sender(message)
