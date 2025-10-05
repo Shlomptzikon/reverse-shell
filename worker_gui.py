@@ -1,6 +1,11 @@
 import flet as ft
 from flet.core.types import FontWeight
+import re
 
+from numpy.ma.core import correlate
+from sympy.physics.units import current
+
+from mysql.components import field
 from rs_worker import Worker
 
 class App:
@@ -16,7 +21,8 @@ class App:
         )
         self.username_input = ft.TextField(label="enter user name", filled=True,border=ft.InputBorder.UNDERLINE)
         self.password_input = ft.TextField(label="enter password", filled=True, border=ft.InputBorder.UNDERLINE, on_change=self.check_password)
-        self.validate_password = ft.Text("password must be at least 12 characters and contain at least: one special character, one digit and one capital letter.")
+        self.validate_password = ft.Text("password must be at least 12 characters and contain at least: one special character, one digit and one capital letter.", color=ft.Colors.RED)
+        self.validated = False
         self.success = ft.Text()
         self.submit_button = ft.OutlinedButton(text="submit", on_click=self.submitted,disabled=True)
         self.update_button = ft.OutlinedButton(text="update",on_click=self.updated,disabled=True)
@@ -31,15 +37,39 @@ class App:
         self.success.value = msg
         self.page.update()
     def submitted(self,e):
-        if self.username_input.value == "" or self.password_input.value == "":
+        if self.username_input.value == "" or self.password_input.value == "" or self.validated == False:
             return
         msg = self.worker.sign_up(self.username_input.value,self.password_input.value)
         self.success.value = msg
         self.submit_button.disabled = True
         self.update_button.disabled = False
+        #self.worker.run()
         self.page.update()
     def check_password(self,e):
-        pass
+        correct_len= "be at least 12 characters and"
+        cap = "one capital letter"
+        special = "one special character,"
+        digit = "one digit,"
+        current_password = e.control.value
+        if len(current_password) >= 12:
+            correct_len = ""
+        if re.search(r'[A-Z]',current_password):
+            cap = ""
+        if re.search(r'\d',current_password):
+            digit = ""
+        if re.search(r'[^\w\s]',current_password):
+            special = ""
+        if (not correct_len) and (not cap) and (not digit) and (not special):
+            self.validate_password.value = "nice password"
+            self.validate_password.color = ft.Colors.GREEN
+            self.validated = True
+        else:
+            self.validate_password.value = f"password must {correct_len} contain: {special} {digit} {cap}"
+            self.validate_password.color = ft.Colors.RED
+            self.validated = False
+
+        self.page.update()
+
 
     def main(self, page:ft.Page):
         self.page = page
@@ -47,6 +77,7 @@ class App:
             self.submit_button.disabled = False
         else:
             self.update_button.disabled = False
+            self.worker.run()
         self.page.add(
             self.title,
             ft.Column(
@@ -64,6 +95,5 @@ class App:
                 ]
             )
         )
-        self.worker.run()
 
 ft.app(App().main)
