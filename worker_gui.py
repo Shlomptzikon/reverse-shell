@@ -3,6 +3,7 @@ from flet.core.types import FontWeight
 import re
 
 from numpy.ma.core import correlate
+from sympy import content
 from sympy.physics.units import current
 
 from mysql.components import field
@@ -20,7 +21,7 @@ class App:
             border_radius=10
         )
         self.username_input = ft.TextField(label="enter user name", filled=True,border=ft.InputBorder.UNDERLINE)
-        self.password_input = ft.TextField(label="enter password", filled=True, border=ft.InputBorder.UNDERLINE, on_change=self.check_password)
+        self.password_input = ft.TextField(label="enter password", filled=True, border=ft.InputBorder.UNDERLINE, on_change=self.check_password, password=True, can_reveal_password=True)
         self.validate_password = ft.Text("password must be at least 12 characters and contain at least: one special character, one digit and one capital letter.", color=ft.Colors.RED)
         self.validated = False
         self.success = ft.Text()
@@ -29,11 +30,38 @@ class App:
         ip = "10.0.0.9"
         port = 5555
         self.worker = Worker(ip,port)
+        # self.enter_admin = ft.AlertDialog(title="please enter new password for the admin user",
+        #
+        #                                   content=ft.Column(
+        #                                       [
+        #                                           ft.TextField(label="current password", filled=True,
+        #                                                        border=ft.InputBorder.UNDERLINE,
+        #                                                        on_submit=, password=True,
+        #                                                        can_reveal_password=True)
+        #                                           ft.TextField(label="new password", filled=True,
+        #                                                        border=ft.InputBorder.UNDERLINE,
+        #                                                        on_change=self.check_password, password=True,
+        #                                                        can_reveal_password=True)
+        #                                       ]
+        #                                   ),
+        #                                   actions=[
+        #                                       ft.OutlinedButton(text="submit", on_click=self.submit_admin, )
+        #                                   ],
+        #                                   modal=True
+        #                                   )
+    def on_window_event(self,e):
+        if e.data == "close":
+            self.worker.stop_run = True
 
+    # def submit_admin(self,e):
+    #     if self.username_input.value == "" or self.password_input.value == "" or self.validated == False:
+    #         return
+    #     self.worker.create_admin()
+    #     self.page.close(self.enter_admin)
     def updated(self,e):
-        if self.username_input.value == "" or self.password_input.value == "":
+        if self.username_input.value == "" or self.password_input.value == "" or self.validated == False:
             return
-        msg = self.worker.update_user(self.username_input.value,self.password_input.value)
+        msg = self.worker.update(self.username_input.value,self.password_input.value)
         self.success.value = msg
         self.page.update()
     def submitted(self,e):
@@ -77,7 +105,7 @@ class App:
             self.submit_button.disabled = False
         else:
             self.update_button.disabled = False
-            self.worker.run()
+            #self.worker.run()
         self.page.add(
             self.title,
             ft.Column(

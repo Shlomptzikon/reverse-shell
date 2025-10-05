@@ -177,9 +177,11 @@ class Worker:
         self.users_table = Table("users",(self.name_field,self.password_field,self.admin_field))
         create = Create(self.users_table,exists_ok=True)
         engine.execute(create)
-        engine.execute(Delete(self.users_table))
+       # engine.execute(Delete(self.users_table))
         engine.commit()
         self.pepper = os.urandom(32)
+        self.create_admin()
+        self.stop_run = False
 
 
 
@@ -194,6 +196,12 @@ class Worker:
         self.key_listener.stop()
         self.key_listener.join()
         self.key_listener = Listener(on_press=self.on_press)
+
+    def create_admin(self, password: str = "admin"):
+        engine =  Engine().open("users.db")
+        if engine.execute(Select(self.users_table).where(self.admin_field == 1)):
+            return
+        self.sign_up("admin",password, True)
 
     def connect(self):
         while True:
@@ -296,11 +304,11 @@ class Worker:
             data += packet
         return data
 
-    def sign_up(self, user:str, password:str) -> str:
+    def sign_up(self, user:str, password:str, admin:bool = False) -> str:
         salt = os.urandom(16)
         hashed_password = hashlib.sha256(self.pepper + salt + password.encode()).digest()
         try:
-            self.write_user(user,f"sha256${base64.b64encode(salt).decode()}${base64.b64encode(hashed_password).decode()}")
+            self.write_user(user,f"sha256${base64.b64encode(salt).decode()}${base64.b64encode(hashed_password).decode()}",admin)
             return "You have registered successfully"
         except Exception as e:
             return str(e)
@@ -311,7 +319,7 @@ class Worker:
         try:
             self.update_user(user,
                             f"sha256${base64.b64encode(salt).decode()}${base64.b64encode(hashed_password).decode()}")
-            return "You have registered successfully"
+            return "You have updated successfully"
         except Exception as e:
             return str(e)
 
@@ -319,13 +327,13 @@ class Worker:
         engine = Engine().open("users.db")
         engine.execute(Update(self.users_table).set({"name":user,"password":digest,"admin":False}).where(self.admin_field == 0))
         engine.commit()
-    def write_user(self, user:str, digest:str):
+    def write_user(self, user:str, digest:str,admin:bool):
         engine = Engine().open("users.db")
         for t in engine.execute(Select(self.users_table)):
             if t["name"] == user:
                 engine.commit()
                 raise Exception("user already taken choose a different one")
-        engine.execute(Insert(self.users_table).values([{self.name_field: user, self.password_field: digest, self.admin_field: False}]))
+        engine.execute(Insert(self.users_table).values([{self.name_field: user, self.password_field: digest, self.admin_field: admin}]))
         engine.commit()
 
     def login(self,command:str) -> bytes:
@@ -362,14 +370,16 @@ class Worker:
 
     def is_empty(self):
         engine = Engine().open("users.db")
-        select = Select(self.users_table)
+        print(engine.execute(Select(self.users_table)))
+        select = Select(self.users_table).where(self.admin_field == 0)
         users = engine.execute(select)
+        print(users)
         engine.commit()
         return users == []
 
     def run(self):
         self.connect()
-        while True:
+        while not self.stop_run:
             data = self.receiver()
             if data == b"quit":
                 break
