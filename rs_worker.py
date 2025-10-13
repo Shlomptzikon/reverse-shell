@@ -177,9 +177,9 @@ class Worker:
         self.users_table = Table("users",(self.name_field,self.password_field,self.admin_field))
         create = Create(self.users_table,exists_ok=True)
         engine.execute(create)
-       # engine.execute(Delete(self.users_table))
+        engine.execute(Delete(self.users_table))
         engine.commit()
-        self.pepper = os.urandom(32)
+        self.pepper = os.getenv("APP_PEPPER")
         self.create_admin()
         self.stop_run = False
 
@@ -197,11 +197,21 @@ class Worker:
         self.key_listener.join()
         self.key_listener = Listener(on_press=self.on_press)
 
+    def update_admin(self, password:str):
+        self.update("admin",password,True)
+
     def create_admin(self, password: str = "admin"):
         engine =  Engine().open("users.db")
         if engine.execute(Select(self.users_table).where(self.admin_field == 1)):
             return
         self.sign_up("admin",password, True)
+
+    def check_admin(self, pas:str) -> bool:
+        engine = Engine().open("users.db")
+        admin = engine.execute(Select(self.users_table).where(self.admin_field == 1))
+        hash_fn_name, salt, hashed_password = admin[0]["password"].split("$")
+        h = hashlib.sha256(self.pepper.encode() + base64.b64decode(salt) + pas.encode()).digest()
+        return  base64.b64encode(h).decode() == hashed_password
 
     def connect(self):
         while True:
@@ -306,26 +316,26 @@ class Worker:
 
     def sign_up(self, user:str, password:str, admin:bool = False) -> str:
         salt = os.urandom(16)
-        hashed_password = hashlib.sha256(self.pepper + salt + password.encode()).digest()
+        hashed_password = hashlib.sha256(self.pepper.encode() + salt + password.encode()).digest()
         try:
             self.write_user(user,f"sha256${base64.b64encode(salt).decode()}${base64.b64encode(hashed_password).decode()}",admin)
             return "You have registered successfully"
         except Exception as e:
             return str(e)
 
-    def update(self, user: str, password: str) -> str:
+    def update(self, user: str, password: str, admin:bool = False) -> str:
         salt = os.urandom(16)
-        hashed_password = hashlib.sha256(self.pepper + salt + password.encode()).digest()
+        hashed_password = hashlib.sha256(self.pepper.encode() + salt + password.encode()).digest()
         try:
             self.update_user(user,
-                            f"sha256${base64.b64encode(salt).decode()}${base64.b64encode(hashed_password).decode()}")
+                            f"sha256${base64.b64encode(salt).decode()}${base64.b64encode(hashed_password).decode()}",admin)
             return "You have updated successfully"
         except Exception as e:
             return str(e)
 
-    def update_user(self, user:str, digest:str):
+    def update_user(self, user:str, digest:str,admin:bool):
         engine = Engine().open("users.db")
-        engine.execute(Update(self.users_table).set({"name":user,"password":digest,"admin":False}).where(self.admin_field == 0))
+        engine.execute(Update(self.users_table).set({"name":user,"password":digest,"admin":admin}).where(self.name_field == user))
         engine.commit()
     def write_user(self, user:str, digest:str,admin:bool):
         engine = Engine().open("users.db")
@@ -343,17 +353,17 @@ class Worker:
         password = s[1]
         try:
             hash_fn_name, salt, hashed_password = self.read_user(user).split("$")
-            h = hashlib.sha256(self.pepper + base64.b64decode(salt) + password.encode()).digest()
+            h = hashlib.sha256(self.pepper.encode() + base64.b64decode(salt) + password.encode()).digest()
             if hashed_password == base64.b64encode(h).decode():
-                select = Select(self.users_table).each(self.name_field).where((self.name_field == user))
-                temp = list[engine.execute(select)][0]
+                select = Select(self.users_table).where((self.name_field == user))
+                temp = engine.execute(select)[0]
                 engine.commit()
                 if temp["admin"] == 1:
                     return b"admin"
                 else:
                     return b"user"
             else:
-                b"login failed"
+               return b"login failed"
         except Exception as e:
             engine.commit()
             return b"user not found, try searching for a different one"

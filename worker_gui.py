@@ -27,37 +27,52 @@ class App:
         self.success = ft.Text()
         self.submit_button = ft.OutlinedButton(text="submit", on_click=self.submitted,disabled=True)
         self.update_button = ft.OutlinedButton(text="update",on_click=self.updated,disabled=True)
-        ip = "10.0.0.9"
+        ip = "10.0.0.10"
         port = 5555
         self.worker = Worker(ip,port)
-        # self.enter_admin = ft.AlertDialog(title="please enter new password for the admin user",
-        #
-        #                                   content=ft.Column(
-        #                                       [
-        #                                           ft.TextField(label="current password", filled=True,
-        #                                                        border=ft.InputBorder.UNDERLINE,
-        #                                                        on_submit=, password=True,
-        #                                                        can_reveal_password=True)
-        #                                           ft.TextField(label="new password", filled=True,
-        #                                                        border=ft.InputBorder.UNDERLINE,
-        #                                                        on_change=self.check_password, password=True,
-        #                                                        can_reveal_password=True)
-        #                                       ]
-        #                                   ),
-        #                                   actions=[
-        #                                       ft.OutlinedButton(text="submit", on_click=self.submit_admin, )
-        #                                   ],
-        #                                   modal=True
-        #                                   )
+        self.new_admin_pas = ft.TextField(label="new password",
+                                          filled=True,
+                                          border=ft.InputBorder.UNDERLINE,
+                                          on_change=self.check_password,
+                                          password=True,
+                                          can_reveal_password=True,
+                                          disabled=True)
+        self.enter_admin = ft.AlertDialog(title="please enter new password for the admin user",
+                                          content=ft.Column(
+                                              [
+                                                  ft.TextField(label="current password", filled=True,
+                                                               border=ft.InputBorder.UNDERLINE,
+                                                               on_change=self.check_admin, password=True,
+                                                               can_reveal_password=True),
+                                                  self.new_admin_pas,
+                                                  self.validate_password,
+
+                                              ],
+                                              tight=True,
+                                              spacing=10,
+                                              horizontal_alignment=ft.CrossAxisAlignment.CENTER
+                                          ),
+                                          actions=[
+                                              ft.OutlinedButton(text="submit", on_click=self.submit_admin, )
+                                          ],
+                                          modal=True,
+
+                                          )
     def on_window_event(self,e):
         if e.data == "close":
             self.worker.stop_run = True
 
-    # def submit_admin(self,e):
-    #     if self.username_input.value == "" or self.password_input.value == "" or self.validated == False:
-    #         return
-    #     self.worker.create_admin()
-    #     self.page.close(self.enter_admin)
+    def check_admin(self,e):
+        if self.worker.check_admin(e.control.value):
+            self.new_admin_pas.disabled = False
+        else:
+            self.new_admin_pas.enabled = True
+        self.page.update(self.enter_admin)
+    def submit_admin(self,e):
+        if self.new_admin_pas.value == "" or self.validated == False:
+            return
+        self.worker.update_admin(self.new_admin_pas.value)
+        self.page.close(self.enter_admin)
     def updated(self,e):
         if self.username_input.value == "" or self.password_input.value == "" or self.validated == False:
             return
@@ -65,13 +80,13 @@ class App:
         self.success.value = msg
         self.page.update()
     def submitted(self,e):
-        if self.username_input.value == "" or self.password_input.value == "" or self.validated == False:
+        if self.username_input.value == "" or self.password_input.value == "": #or self.validated == False:
             return
         msg = self.worker.sign_up(self.username_input.value,self.password_input.value)
         self.success.value = msg
-        self.submit_button.disabled = True
-        self.update_button.disabled = False
-        #self.worker.run()
+        if "success" in msg:
+            self.submit_button.disabled = True
+            self.update_button.disabled = False
         self.page.update()
     def check_password(self,e):
         correct_len= "be at least 12 characters and"
@@ -105,7 +120,7 @@ class App:
             self.submit_button.disabled = False
         else:
             self.update_button.disabled = False
-            #self.worker.run()
+
         self.page.add(
             self.title,
             ft.Column(
@@ -123,5 +138,8 @@ class App:
                 ]
             )
         )
+        if self.worker.check_admin("admin"):
+            self.page.open(self.enter_admin)
+    #    self.worker.run()
 
 ft.app(App().main)
