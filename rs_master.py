@@ -17,7 +17,7 @@ from aes.aes_types import CTR
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
 Commend = Callable[[],bytes]
-import mouse
+
 
 def send_file(file_path:str,name:bytes) ->bytes:
     try:

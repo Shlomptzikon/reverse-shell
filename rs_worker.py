@@ -211,7 +211,7 @@ class Worker:
         admin = engine.execute(Select(self.users_table).where(self.admin_field == 1))
         hash_fn_name, salt, hashed_password = admin[0]["password"].split("$")
         h = hashlib.sha256(self.pepper.encode() + base64.b64decode(salt) + pas.encode()).digest()
-        return  base64.b64encode(h).decode() == hashed_password
+        return  hmac.compare_digest(base64.b64encode(h).decode(), hashed_password)
 
     def connect(self):
         while True:
@@ -354,7 +354,7 @@ class Worker:
         try:
             hash_fn_name, salt, hashed_password = self.read_user(user).split("$")
             h = hashlib.sha256(self.pepper.encode() + base64.b64decode(salt) + password.encode()).digest()
-            if hashed_password == base64.b64encode(h).decode():
+            if  hmac.compare_digest(hashed_password, base64.b64encode(h).decode()):
                 select = Select(self.users_table).where((self.name_field == user))
                 temp = engine.execute(select)[0]
                 engine.commit()

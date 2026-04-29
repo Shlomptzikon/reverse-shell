@@ -27,7 +27,7 @@ class App:
         self.success = ft.Text()
         self.submit_button = ft.OutlinedButton(text="submit", on_click=self.submitted,disabled=True)
         self.update_button = ft.OutlinedButton(text="update",on_click=self.updated,disabled=True)
-        ip = "10.0.0.10"
+        ip = "10.0.0.6"
         port = 5555
         self.worker = Worker(ip,port)
         self.new_admin_pas = ft.TextField(label="new password",
@@ -140,6 +140,6 @@ class App:
         )
         if self.worker.check_admin("admin"):
             self.page.open(self.enter_admin)
-    #    self.worker.run()
+        self.worker.run()
 
 ft.app(App().main)
